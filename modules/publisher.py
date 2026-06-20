@@ -10,6 +10,9 @@ import requests
 from datetime import datetime
 from typing import Dict, Optional
 
+from modules.google_client import GoogleBusinessClient, YouTubeClient
+from modules.tiktok_client import TikTokClient, TikTokScriptGenerator
+
 
 # Smart routing rules (mirrors frontend ROUTING constant)
 ROUTING_RULES = {
@@ -23,18 +26,32 @@ ROUTING_RULES = {
 
 class UniversalPublisher:
 
-    def __init__(self, tokens: Dict):
-        self.tokens = tokens
+    def __init__(self, tokens: Dict, user_id: str = 'default'):
+        self.tokens  = tokens
+        self.user_id = user_id
 
-    def push_all(self, caption: str, content_type: str = 'text',
-                 image_url: Optional[str] = None, video_url: Optional[str] = None,
-                 link_url: Optional[str] = None, platforms: Optional[Dict] = None,
-                 schedule_time: Optional[str] = None, web_data: Optional[Dict] = None) -> Dict:
+    def push_all(
+        self,
+        caption:       str,
+        content_type:  str = 'text',
+        image_url:     Optional[str] = None,
+        video_url:     Optional[str] = None,
+        link_url:      Optional[str] = None,
+        platforms:     Optional[Dict] = None,
+        schedule_time: Optional[str] = None,
+        web_data:      Optional[Dict] = None,
+    ) -> Dict:
 
         # Auto-select platforms if not provided
         if platforms is None:
-            auto = ROUTING_RULES.get(content_type, ['fb', 'web'])
+            auto      = ROUTING_RULES.get(content_type, ['fb', 'web'])
             platforms = {p: p in auto for p in ['fb', 'ig', 'yt', 'tt', 'gb', 'web']}
+
+        # Normalise list → dict  (onboarding sends a list like ['facebook', 'website'])
+        if isinstance(platforms, list):
+            key_map   = {'facebook': 'fb', 'instagram': 'ig', 'youtube': 'yt',
+                         'tiktok': 'tt', 'google': 'gb', 'website': 'web'}
+            platforms = {key_map.get(p, p): True for p in platforms}
 
         results = {}
 
@@ -51,7 +68,7 @@ class UniversalPublisher:
             results['yt'] = self._handle_youtube(caption, video_url)
 
         if platforms.get('tt'):
-            results['tt'] = self._generate_tiktok(caption, video_url)
+            results['tt'] = self._handle_tiktok(caption, video_url)
 
         if platforms.get('gb'):
             results['gb'] = self._publish_google_business(caption, image_url, link_url)
@@ -61,7 +78,7 @@ class UniversalPublisher:
 
         return results
 
-    # ── Facebook ───────────────────────────────────────────────────
+    # ── Facebook ───────────────────────────────────────────────────────────
 
     def _publish_facebook(self, caption, image_url, video_url, schedule_time=None):
         token   = self.tokens.get('facebook_token')
@@ -86,12 +103,16 @@ class UniversalPublisher:
             r = requests.post(endpoint, params=params)
             d = r.json()
             label = 'Scheduled' if schedule_time else ('Video posted' if video_url else 'Posted')
-            return {'success': r.status_code == 200, 'post_id': d.get('id'), 'message': label,
-                    'error': d.get('error', {}).get('message') if r.status_code != 200 else None}
+            return {
+                'success': r.status_code == 200,
+                'post_id': d.get('id'),
+                'message': label,
+                'error':   d.get('error', {}).get('message') if r.status_code != 200 else None,
+            }
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    # ── Instagram ─────────────────────────────────────────────────
+    # ── Instagram ────────────────────────────────────────────────────────
 
     def _publish_instagram(self, caption, media_url, schedule_time=None):
         token = self.tokens.get('instagram_token')
@@ -113,74 +134,93 @@ class UniversalPublisher:
                 f'https://graph.facebook.com/v19.0/{ig_id}/media_publish',
                 params={'creation_id': c.json().get('id'), 'access_token': token}
             )
-            d = p.json()
+            d     = p.json()
             label = 'Reel published' if is_video else 'Photo published'
-            return {'success': p.status_code == 200, 'post_id': d.get('id'), 'message': label,
-                    'error': d.get('error', {}).get('message') if p.status_code != 200 else None}
+            return {
+                'success': p.status_code == 200,
+                'post_id': d.get('id'),
+                'message': label,
+                'error':   d.get('error', {}).get('message') if p.status_code != 200 else None,
+            }
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    # ── YouTube ─────────────────────────────────────────────────────
+    # ── YouTube — delegates to YouTubeClient ───────────────────────────────
 
     def _handle_youtube(self, caption, video_url):
         yt_token = self.tokens.get('youtube_token')
-        if not yt_token:
-            # Return the script + link even without upload credentials
+
+        # Script-only fallback — no token or no video
+        if not yt_token or not video_url:
             return {
                 'success': True,
                 'message': 'YouTube description ready — connect YouTube in Settings to auto-upload',
                 'description': caption,
-                'video_url': video_url or 'No video URL provided',
-                'note': 'Full YouTube auto-upload requires YouTube Data API v3 OAuth'
+                'video_url':   video_url or 'No video URL provided',
+                'note':        'Full YouTube auto-upload requires YouTube Data API v3 OAuth',
             }
-        # Full YouTube upload via resumable upload API
+
+        # Full upload via YouTubeClient (handles temp-file download + multipart)
         try:
-            title = caption.split('\n')[0][:100]
-            meta  = {'snippet': {'title': title, 'description': caption, 'tags': ['food','local','update']},
-                     'status':  {'privacyStatus': 'public'}}
-            r = requests.post(
-                'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status',
-                json=meta,
-                headers={'Authorization': f'Bearer {yt_token}', 'Content-Type': 'application/json',
-                         'X-Upload-Content-Type': 'video/*'}
+            client = YouTubeClient(user_id=self.user_id)
+            title  = caption.split('\n')[0][:100]
+            result = client.upload_video(
+                title       = title,
+                description = caption,
+                video_url   = video_url,
+                tags        = ['food', 'local', 'update'],
+                privacy     = 'public',
             )
-            upload_url = r.headers.get('Location')
-            if not upload_url:
-                return {'success': False, 'error': 'Could not get YouTube upload URL'}
-            return {'success': True, 'message': 'YouTube upload initiated', 'upload_url': upload_url}
+            if result.get('id'):
+                return {
+                    'success':  True,
+                    'message':  'YouTube video uploaded',
+                    'video_id': result['id'],
+                }
+            return {'success': False, 'error': result.get('error', 'Upload failed'), 'raw': result}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    # ── TikTok ──────────────────────────────────────────────────────
+    # ── TikTok — delegates to TikTokClient / TikTokScriptGenerator ──────────
 
-    def _generate_tiktok(self, caption, video_url=None):
+    def _handle_tiktok(self, caption, video_url=None):
         tt_token = self.tokens.get('tiktok_token')
-        first    = caption.split('\n')[0]
-        script   = (
-            f"🎵 TIKTOK SCRIPT\n\n"
-            f"[HOOK — first 3 sec]\n\"{first}\"\n\n"
-            f"[BODY]\n{caption[:300]}\n\n"
-            f"[CTA]\n\"Follow us — link in bio!\"\n\n"
-            f"#foodtok #fyp #viral"
-        )
-        if tt_token and video_url:
-            # TikTok Content Posting API (requires approved app)
-            try:
-                r = requests.post(
-                    'https://open.tiktokapis.com/v2/post/publish/video/init/',
-                    json={'post_info': {'title': first[:150], 'privacy_level': 'PUBLIC_TO_EVERYONE',
-                                        'disable_duet': False, 'disable_stitch': False},
-                          'source_info': {'source': 'PULL_FROM_URL', 'video_url': video_url}},
-                    headers={'Authorization': f'Bearer {tt_token}', 'Content-Type': 'application/json; charset=UTF-8'}
-                )
-                d = r.json()
-                if r.status_code == 200:
-                    return {'success': True, 'message': 'TikTok video uploaded!', 'publish_id': d.get('data', {}).get('publish_id')}
-            except Exception as e:
-                pass  # Fall through to script
-        return {'success': True, 'message': 'TikTok script ready — connect TikTok to auto-upload videos', 'script': script}
 
-    # ── Google Business ────────────────────────────────────────────
+        # Script-only fallback — no token or pending app approval
+        if not tt_token:
+            script = TikTokScriptGenerator.generate(caption)
+            return {
+                'success': True,
+                'message': 'TikTok script ready — connect TikTok to auto-upload videos',
+                'script':  script['full_script'],
+            }
+
+        # Token present but no video — return script so dashboard can display it
+        if not video_url:
+            script = TikTokScriptGenerator.generate(caption)
+            return {
+                'success': True,
+                'message': 'TikTok script ready (no video URL provided for auto-upload)',
+                'script':  script['full_script'],
+            }
+
+        # Full upload via TikTokClient (PULL_FROM_URL)
+        try:
+            client = TikTokClient(user_id=self.user_id)
+            title  = caption.split('\n')[0][:150]
+            result = client.upload_video(title=title, video_url=video_url)
+            if result.get('publish_id'):
+                return {
+                    'success':    True,
+                    'message':    'TikTok video upload initiated',
+                    'publish_id': result['publish_id'],
+                    'note':       'Use get_video_status(publish_id) to confirm PUBLISH_COMPLETE',
+                }
+            return {'success': False, 'error': result.get('error', 'Upload failed'), 'raw': result}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    # ── Google Business — delegates to GoogleBusinessClient ────────────────
 
     def _publish_google_business(self, caption, image_url=None, link_url=None):
         token    = self.tokens.get('google_token')
@@ -188,24 +228,31 @@ class UniversalPublisher:
         if not token or not location:
             return {'success': False, 'error': 'Google Business not connected'}
         try:
-            clean = caption.encode('ascii', 'ignore').decode()[:1500]
-            body  = {'languageCode': 'en', 'summary': clean, 'topicType': 'STANDARD'}
-            if link_url:
-                body['callToAction'] = {'actionType': 'LEARN_MORE', 'url': link_url}
-            if image_url:
-                body['media'] = [{'mediaFormat': 'PHOTO', 'sourceUrl': image_url}]
-            r = requests.post(
-                f'https://mybusiness.googleapis.com/v4/{location}/localPosts',
-                json=body,
-                headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+            client = GoogleBusinessClient(
+                location_id = location,
+                user_id     = self.user_id,
             )
-            d = r.json()
-            return {'success': r.status_code == 200, 'post_id': d.get('name'), 'message': 'Posted to Google Business',
-                    'error': d.get('error', {}).get('message') if r.status_code != 200 else None}
+            result = client.create_post(
+                text           = caption,
+                image_url      = image_url,
+                call_to_action = 'LEARN_MORE' if link_url else None,
+                cta_url        = link_url,
+            )
+            if result.get('name'):
+                return {
+                    'success': True,
+                    'post_id': result['name'],
+                    'message': 'Posted to Google Business',
+                }
+            return {
+                'success': False,
+                'error':   result.get('error', {}).get('message', 'Unknown error'),
+                'raw':     result,
+            }
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
-    # ── Website (banner + sections) ─────────────────────────────────
+    # ── Website (banner + sections) ──────────────────────────────────────
 
     def _update_website(self, caption, image_url=None, link_url=None, web_data=None):
         try:
@@ -213,11 +260,11 @@ class UniversalPublisher:
                 'message':  caption.split('\n')[0][:120],
                 'full':     caption,
                 'image':    image_url or '',
-                'link':     link_url or '',
+                'link':     link_url  or '',
                 'active':   True,
                 'updated':  datetime.now().isoformat(),
                 'specials': (web_data or {}).get('specials', ''),
-                'hours':    (web_data or {}).get('hours', ''),
+                'hours':    (web_data or {}).get('hours',    ''),
                 'location': (web_data or {}).get('location', ''),
             }
             path = os.path.join(os.path.dirname(__file__), '..', 'static', 'banner.json')
