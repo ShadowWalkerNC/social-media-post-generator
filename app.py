@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """
-PostPilot Pro — Smart Content Hub
-Write once → smart routing sends videos to video platforms,
-text to text platforms, images to image platforms.
+Post-Pilot — Smart Social Media Hub
+Session 14: fully wired app.py
+  - v1 API blueprint (SRN-compliant)
+  - Website hub routes
+  - Public site renderer + preview
+  - DB init (api_keys, websites, post_history tables)
+  - Public landing page for logged-out visitors
 """
 
 import os
+import json
+import sqlite3
 from flask import (
     Flask, render_template, request, jsonify,
-    redirect, url_for, session, flash
+    redirect, url_for, session, flash, g
 )
 from flask_login import (
     LoginManager, login_user, logout_user,
@@ -22,16 +28,21 @@ from modules.analytics_client  import Analytics
 from modules.publisher         import UniversalPublisher
 from modules.user_manager      import UserManager, User
 from modules.billing_manager   import BillingManager
+from modules.website_manager   import WebsiteManager
+from modules.api_manager       import v1 as v1_blueprint, CREATE_API_KEYS_TABLE
 
 load_dotenv()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-secret-change-me')
 
+# ── Register blueprints ───────────────────────────────────────────────────
+app.register_blueprint(v1_blueprint)          # mounts at /v1/*
+
 # ── Flask-Login ──────────────────────────────────────────────────────────
 login_manager = LoginManager(app)
 login_manager.login_view    = 'login'
-login_manager.login_message = 'Please sign in to access PostPilot Pro.'
+login_manager.login_message = 'Please sign in to access Post-Pilot.'
 
 @login_manager.user_loader
 def load_user(user_id: str):
@@ -41,10 +52,79 @@ def load_user(user_id: str):
 user_sessions = {}   # in-memory token cache, keyed by user UUID
 
 
+# ── DB init ──────────────────────────────────────────────────────────────
+
+DATABASE = os.getenv('DATABASE_PATH', 'postpilot.db')
+
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+        db.row_factory = sqlite3.Row
+    return db
+
+@app.teardown_appcontext
+def close_db(exc):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+def init_db():
+    """Create all tables that don't yet exist."""
+    with app.app_context():
+        db = sqlite3.connect(DATABASE)
+        db.row_factory = sqlite3.Row
+
+        # api_keys table (Session 12)
+        db.execute(CREATE_API_KEYS_TABLE)
+
+        # websites table (Session 11)
+        db.execute(WebsiteManager.create_table_sql())
+
+        # post_history table (used by /v1/get_history + UserManager.log_post)
+        db.execute('''
+        CREATE TABLE IF NOT EXISTS post_history (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      TEXT    NOT NULL,
+            caption      TEXT,
+            content_type TEXT    DEFAULT 'text',
+            image_url    TEXT,
+            video_url    TEXT,
+            platforms    TEXT,   -- JSON array
+            results      TEXT,   -- JSON object
+            status       TEXT    DEFAULT 'published',
+            post_url     TEXT,
+            scheduled_at INTEGER,
+            created_at   INTEGER DEFAULT (strftime('%s','now'))
+        );
+        ''')
+
+        # users table (if not already created by user_manager)
+        db.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id                TEXT PRIMARY KEY,
+            email             TEXT UNIQUE NOT NULL,
+            password_hash     TEXT NOT NULL,
+            display_name      TEXT,
+            subscription_tier TEXT DEFAULT 'free',
+            stripe_customer_id TEXT,
+            created_at        INTEGER,
+            last_login_at     INTEGER,
+            business_profile  TEXT,
+            platform_tokens   TEXT
+        );
+        ''')
+
+        db.commit()
+        db.close()
+        print('✅ DB initialised')
+
+
 # ── AUTH ROUTES ───────────────────────────────────────────────────────────
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    plan = request.args.get('plan', '')          # from marketing page CTA
     if current_user.is_authenticated:
         return redirect(url_for('home'))
     if request.method == 'POST':
@@ -53,18 +133,21 @@ def register():
         display_name = request.form.get('display_name', '').strip()
         if not email or not password:
             flash('Email and password are required.')
-            return render_template('register.html')
+            return render_template('register.html', plan=plan)
         if len(password) < 8:
             flash('Password must be at least 8 characters.')
-            return render_template('register.html')
+            return render_template('register.html', plan=plan)
         user = UserManager.create_user(email, password, display_name=display_name)
         if not user:
             flash('An account with that email already exists.')
-            return render_template('register.html')
+            return render_template('register.html', plan=plan)
         login_user(user, remember=True)
         UserManager.touch_login(user.id)
+        # If a paid plan was selected on the marketing page, go straight to checkout
+        if plan and plan != 'free':
+            return redirect(url_for('billing_checkout', plan=plan))
         return redirect(url_for('onboarding'))
-    return render_template('register.html')
+    return render_template('register.html', plan=plan)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -89,7 +172,17 @@ def login():
 def logout():
     logout_user()
     flash('You have been signed out.', 'success')
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
+
+
+# ── LANDING / PUBLIC ROUTES ───────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    """Public marketing page. Redirect to dashboard if already logged in."""
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+    return render_template('index.html', site={})
 
 
 # ── BILLING ROUTES ────────────────────────────────────────────────────────
@@ -135,7 +228,7 @@ def billing_portal():
 def billing_cancel():
     ok = BillingManager.cancel_subscription(current_user.id)
     if ok:
-        flash('Your plan will cancel at the end of the billing period. You keep access until then.', 'success')
+        flash('Your plan will cancel at the end of the billing period.', 'success')
     else:
         flash('Could not cancel. Please use Manage Plan or contact support.')
     return redirect(url_for('billing'))
@@ -143,16 +236,124 @@ def billing_cancel():
 
 @app.route('/webhooks/stripe', methods=['POST'])
 def stripe_webhook():
-    """Stripe sends events here. Must be public (no @login_required)."""
     payload    = request.data
     sig_header = request.headers.get('Stripe-Signature', '')
     body, code = BillingManager.handle_webhook(payload, sig_header)
     return jsonify(body), code
 
 
-# ── PAGE ROUTES ───────────────────────────────────────────────────────────
+# ── WEBSITE HUB ROUTES ────────────────────────────────────────────────────
 
-@app.route('/')
+@app.route('/website')
+@login_required
+def website_hub():
+    wm   = WebsiteManager(user_id=current_user.id)
+    site = wm.get_site()
+    return render_template(
+        'website_hub.html',
+        site=site,
+        business_name=_business_name(),
+    )
+
+
+@app.route('/website/save', methods=['POST'])
+@login_required
+def website_save():
+    wm      = WebsiteManager(user_id=current_user.id)
+    payload = request.get_json(silent=True) or {}
+    result  = wm.save_site(payload)
+    return jsonify(result)
+
+
+@app.route('/website/publish', methods=['POST'])
+@login_required
+def website_publish():
+    wm        = WebsiteManager(user_id=current_user.id)
+    data      = request.get_json(silent=True) or {}
+    published = bool(data.get('published', False))
+    result    = wm.set_published(published)
+    return jsonify(result)
+
+
+@app.route('/website/verify_domain', methods=['POST'])
+@login_required
+def website_verify_domain():
+    wm     = WebsiteManager(user_id=current_user.id)
+    data   = request.get_json(silent=True) or {}
+    domain = data.get('domain', '').strip()
+    if not domain:
+        return jsonify({'success': False, 'error': 'domain required'})
+    result = wm.verify_domain(domain)
+    return jsonify(result)
+
+
+# ── PUBLIC SITE RENDERER ──────────────────────────────────────────────────
+
+@app.route('/site/preview')
+@login_required
+def site_preview():
+    """Live preview iframe — shows the logged-in user's draft site."""
+    wm   = WebsiteManager(user_id=current_user.id)
+    site = wm.get_site()
+    return _render_public_site(site, preview=True)
+
+
+@app.route('/site/<user_id>')
+def site_public(user_id: str):
+    """Public-facing site for a given user_id. Only renders if published."""
+    wm   = WebsiteManager(user_id=user_id)
+    site = wm.get_site()
+    if not site.get('published'):
+        return render_template('index.html', site={}), 404
+    return _render_public_site(site, preview=False)
+
+
+def _render_public_site(site: dict, preview: bool = False):
+    """
+    Render the public website for a user.
+    Falls back to a minimal inline render if no dedicated template exists yet.
+    """
+    # Build active sections list
+    sections     = site.get('sections') or WebsiteManager.DEFAULT_SECTIONS
+    active_secs  = [s for s in sections if s.get('enabled')]
+    seo          = site.get('seo') or {}
+    socials      = site.get('socials') or {}
+    theme        = site.get('theme', 'modern')
+    color        = site.get('primary_color', '#6366f1')
+
+    try:
+        return render_template(
+            'public_site.html',
+            site=site,
+            sections=active_secs,
+            seo=seo,
+            socials=socials,
+            theme=theme,
+            primary_color=color,
+            preview=preview,
+        )
+    except Exception:
+        # Fallback: minimal HTML so preview iframe is never blank
+        sec_html = ''.join(
+            f'<section id="{s["id"]}" style="padding:2rem;border-bottom:1px solid #eee">'
+            f'<h2>{s["label"]}</h2></section>'
+            for s in active_secs
+        )
+        title = seo.get('title') or 'My Business'
+        return (
+            f'<!DOCTYPE html><html><head><meta charset="UTF-8">'
+            f'<title>{title}</title>'
+            f'<style>body{{font-family:sans-serif;margin:0;padding:0}}'
+            f'h1{{background:{color};color:#fff;padding:2rem;margin:0}}</style>'
+            f'</head><body>'
+            f'{"<div style=\"background:#fbbf24;color:#000;text-align:center;padding:.5rem;font-size:.8rem\">PREVIEW MODE</div>" if preview else ""}'
+            f'<h1>{title}</h1>{sec_html}</body></html>'
+        ), 200
+
+
+# ── DASHBOARD & APP PAGES ─────────────────────────────────────────────────
+
+@app.route('/dashboard')
 @login_required
 def home():
     return render_template('dashboard.html')
@@ -183,10 +384,21 @@ def onboarding():
     return render_template('onboarding.html')
 
 
-# ── HELPER ────────────────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────
 
 def _uid() -> str:
     return current_user.id if current_user.is_authenticated else 'default'
+
+def _business_name() -> str:
+    if not current_user.is_authenticated:
+        return 'Your Business'
+    profile = current_user.__dict__.get('business_profile') or {}
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except Exception:
+            profile = {}
+    return profile.get('name') or current_user.__dict__.get('display_name') or 'Your Business'
 
 
 # ── CORE: UNIVERSAL PUSH ─────────────────────────────────────────────────
@@ -194,7 +406,7 @@ def _uid() -> str:
 @app.route('/api/push_all', methods=['POST'])
 @login_required
 def api_push_all():
-    data      = request.json
+    data      = request.json or {}
     uid       = _uid()
     tokens    = user_sessions.get(uid, {}).get('tokens', {})
     publisher = UniversalPublisher(tokens, user_id=uid)
@@ -225,7 +437,7 @@ def api_push_all():
 @app.route('/api/publish', methods=['POST'])
 @login_required
 def api_publish():
-    data      = request.json
+    data      = request.json or {}
     uid       = _uid()
     tokens    = user_sessions.get(uid, {}).get('tokens', {})
     publisher = UniversalPublisher(tokens, user_id=uid)
@@ -249,7 +461,7 @@ def api_publish():
     return jsonify({'success': True, 'results': results})
 
 
-# ── ONBOARDING SETUP ─────────────────────────────────────────────────────
+# ── ONBOARDING ────────────────────────────────────────────────────────────
 
 @app.route('/api/onboarding/setup', methods=['POST'])
 @login_required
@@ -272,7 +484,7 @@ def api_onboarding_setup():
     return jsonify({'success': True, 'business': business_info})
 
 
-# ── CONNECTION STATUS ────────────────────────────────────────────────────
+# ── CONNECTION STATUS ─────────────────────────────────────────────────────
 
 @app.route('/api/connection_status', methods=['POST'])
 @login_required
@@ -292,12 +504,12 @@ def api_connection_status():
     })
 
 
-# ── GENERATE / SCHEDULE / ANALYTICS ─────────────────────────────────────
+# ── GENERATE / SCHEDULE / ANALYTICS ──────────────────────────────────────
 
 @app.route('/api/setup_business', methods=['POST'])
 @login_required
 def api_setup_business():
-    data = request.json
+    data = request.json or {}
     uid  = _uid()
     user_sessions.setdefault(uid, {})
     gen  = SocialMediaPostGenerator()
@@ -309,7 +521,7 @@ def api_setup_business():
 @app.route('/api/setup_tokens', methods=['POST'])
 @login_required
 def api_setup_tokens():
-    data = request.json
+    data = request.json or {}
     uid  = _uid()
     user_sessions.setdefault(uid, {})
     user_sessions[uid]['tokens'] = data.get('tokens', {})
@@ -330,7 +542,7 @@ def api_generate_weekly():
 @app.route('/api/generate_post', methods=['POST'])
 @login_required
 def api_generate_post():
-    data     = request.json
+    data     = request.json or {}
     uid      = _uid()
     template = data.get('template', 'instagram_location')
     gen      = user_sessions.get(uid, {}).get('generator', SocialMediaPostGenerator())
@@ -350,7 +562,7 @@ def api_schedule_post():
 @login_required
 def api_analytics():
     uid     = _uid()
-    data    = request.json
+    data    = request.json or {}
     tokens  = user_sessions.get(uid, {}).get('tokens', {})
     token   = tokens.get('facebook_token') or data.get('access_token')
     page_id = tokens.get('facebook_page_id') or data.get('page_id')
@@ -360,7 +572,7 @@ def api_analytics():
     return jsonify(Analytics(token, page_id).get_weekly_summary())
 
 
-# ── OAUTH: META ────────────────────────────────────────────────────────
+# ── OAUTH: META ───────────────────────────────────────────────────────────
 
 @app.route('/auth/facebook')
 @login_required
@@ -368,10 +580,13 @@ def auth_facebook():
     app_id       = os.getenv('FACEBOOK_APP_ID')
     redirect_uri = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
     scopes       = 'pages_manage_posts,pages_read_engagement,instagram_content_publish,instagram_basic'
-    session['oauth_next'] = request.args.get('next', '/')
-    session['oauth_step'] = request.args.get('step', '2')
+    session['oauth_next']     = request.args.get('next', '/')
+    session['oauth_step']     = request.args.get('step', '2')
     session['oauth_platform'] = 'facebook'
-    return redirect(f'https://www.facebook.com/v19.0/dialog/oauth?client_id={app_id}&redirect_uri={redirect_uri}&scope={scopes}')
+    return redirect(
+        f'https://www.facebook.com/v19.0/dialog/oauth'
+        f'?client_id={app_id}&redirect_uri={redirect_uri}&scope={scopes}'
+    )
 
 
 @app.route('/auth/facebook/callback')
@@ -403,10 +618,13 @@ def auth_facebook_callback():
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '2')
     platform = session.pop('oauth_platform', 'facebook')
-    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
+    return redirect(
+        f'/onboarding?connected={platform}&step={step}'
+        if next_url == '/onboarding' else url_for('home')
+    )
 
 
-# ── OAUTH: GOOGLE ────────────────────────────────────────────────────────
+# ── OAUTH: GOOGLE ─────────────────────────────────────────────────────────
 
 @app.route('/auth/google')
 @login_required
@@ -414,10 +632,14 @@ def auth_google():
     client_id = os.getenv('GOOGLE_CLIENT_ID')
     redir     = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
     scope     = 'https://www.googleapis.com/auth/business.manage https://www.googleapis.com/auth/youtube.upload'
-    session['oauth_next'] = request.args.get('next', '/')
-    session['oauth_step'] = request.args.get('step', '3')
+    session['oauth_next']     = request.args.get('next', '/')
+    session['oauth_step']     = request.args.get('step', '3')
     session['oauth_platform'] = 'google'
-    return redirect(f'https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redir}&response_type=code&scope={scope}&access_type=offline')
+    return redirect(
+        f'https://accounts.google.com/o/oauth2/v2/auth'
+        f'?client_id={client_id}&redirect_uri={redir}'
+        f'&response_type=code&scope={scope}&access_type=offline'
+    )
 
 
 @app.route('/auth/google/callback')
@@ -426,21 +648,21 @@ def auth_google_callback():
     import requests as req
     from modules.auth_manager import save_token
     from datetime import datetime, timedelta
-    code    = request.args.get('code')
-    cid     = os.getenv('GOOGLE_CLIENT_ID')
-    csec    = os.getenv('GOOGLE_CLIENT_SECRET')
-    redir   = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
-    tokens  = req.post('https://oauth2.googleapis.com/token',
-                       data={'code': code, 'client_id': cid, 'client_secret': csec,
-                             'redirect_uri': redir, 'grant_type': 'authorization_code'}).json()
-    gtoken  = tokens.get('access_token')
-    rtoken  = tokens.get('refresh_token')
-    accts   = req.get('https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-                      headers={'Authorization': f'Bearer {gtoken}'}).json()
-    acct    = (accts.get('accounts') or [{}])[0].get('name', '')
-    locs    = req.get(f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
-                      headers={'Authorization': f'Bearer {gtoken}'}).json()
-    loc_id  = (locs.get('locations') or [{}])[0].get('name', '')
+    code   = request.args.get('code')
+    cid    = os.getenv('GOOGLE_CLIENT_ID')
+    csec   = os.getenv('GOOGLE_CLIENT_SECRET')
+    redir  = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
+    tokens = req.post('https://oauth2.googleapis.com/token',
+                      data={'code': code, 'client_id': cid, 'client_secret': csec,
+                            'redirect_uri': redir, 'grant_type': 'authorization_code'}).json()
+    gtoken = tokens.get('access_token')
+    rtoken = tokens.get('refresh_token')
+    accts  = req.get('https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+                     headers={'Authorization': f'Bearer {gtoken}'}).json()
+    acct   = (accts.get('accounts') or [{}])[0].get('name', '')
+    locs   = req.get(f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
+                     headers={'Authorization': f'Bearer {gtoken}'}).json()
+    loc_id = (locs.get('locations') or [{}])[0].get('name', '')
     uid = _uid()
     user_sessions.setdefault(uid, {})
     user_sessions[uid].setdefault('tokens', {}).update(
@@ -451,10 +673,13 @@ def auth_google_callback():
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '3')
     platform = session.pop('oauth_platform', 'google')
-    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
+    return redirect(
+        f'/onboarding?connected={platform}&step={step}'
+        if next_url == '/onboarding' else url_for('home')
+    )
 
 
-# ── OAUTH: TIKTOK ────────────────────────────────────────────────────────
+# ── OAUTH: TIKTOK ─────────────────────────────────────────────────────────
 
 @app.route('/auth/tiktok')
 @login_required
@@ -462,10 +687,13 @@ def auth_tiktok():
     client_key = os.getenv('TIKTOK_CLIENT_KEY')
     redir      = os.getenv('TIKTOK_REDIRECT_URI', 'http://localhost:5000/auth/tiktok/callback')
     scope      = 'user.info.basic,video.upload,video.publish'
-    session['oauth_next'] = request.args.get('next', '/')
-    session['oauth_step'] = request.args.get('step', '4')
+    session['oauth_next']     = request.args.get('next', '/')
+    session['oauth_step']     = request.args.get('step', '4')
     session['oauth_platform'] = 'tiktok'
-    return redirect(f'https://www.tiktok.com/v2/auth/authorize?client_key={client_key}&redirect_uri={redir}&response_type=code&scope={scope}')
+    return redirect(
+        f'https://www.tiktok.com/v2/auth/authorize'
+        f'?client_key={client_key}&redirect_uri={redir}&response_type=code&scope={scope}'
+    )
 
 
 @app.route('/auth/tiktok/callback')
@@ -492,10 +720,16 @@ def auth_tiktok_callback():
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '4')
     platform = session.pop('oauth_platform', 'tiktok')
-    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
+    return redirect(
+        f'/onboarding?connected={platform}&step={step}'
+        if next_url == '/onboarding' else url_for('home')
+    )
 
+
+# ── ENTRYPOINT ────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    print('🚀 PostPilot Pro — Smart Content Hub')
+    init_db()
+    print('🚀 Post-Pilot — Smart Social Media Hub')
     print('🌐 Open: http://localhost:5000')
     app.run(debug=True, port=5000)
