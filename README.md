@@ -1,6 +1,6 @@
-# 🚀 Social Media Post Generator
+# 🚀 PostPilot Pro
 
-Automated social media post generator for **food trucks, restaurants, hotels, cafes, and food companies**.
+**Automated social media post generator for food trucks, restaurants, hotels, cafes, and food companies.**
 
 Generates high-engagement posts and publishes directly to **Facebook & Instagram** via the Meta Graph API.
 
@@ -22,29 +22,28 @@ Generates high-engagement posts and publishes directly to **Facebook & Instagram
 ## 📁 Project Structure
 
 ```
-social-media-post-generator/
+postpilot-pro/
 │
-├── app.py                  # Flask main app (GUI + API routes)
-├── requirements.txt        # Python dependencies
-├── .env.example            # Environment variables template
+├── app.py                       # Flask main app (GUI + API routes)
+├── requirements.txt             # Python dependencies
+├── .env.example                 # Environment variables template
 │
 ├── modules/
-│   ├── generator.py        # Post generation logic
-│   ├── meta_api.py         # Facebook/Instagram API integration
-│   ├── scheduler.py        # Post scheduling logic
-│   └── analytics.py        # Analytics fetching
+│   ├── post_generator.py        # Post generation logic
+│   ├── meta_client.py           # Facebook/Instagram API integration
+│   ├── post_scheduler.py        # Post scheduling logic
+│   └── analytics_client.py     # Analytics fetching
 │
 ├── templates/
-│   ├── index.html          # Home / landing page
-│   ├── setup.html          # Business setup form
-│   ├── generate.html       # Generate & publish posts
-│   ├── calendar.html       # Visual content calendar
-│   ├── schedule.html       # Schedule individual post
-│   └── analytics.html      # Analytics dashboard
+│   ├── index.html               # Home / landing page
+│   ├── setup.html               # Business setup form
+│   ├── generate.html            # Generate & publish posts
+│   ├── calendar.html            # Visual content calendar
+│   └── analytics.html          # Analytics dashboard
 │
 └── static/
-    ├── style.css           # Global styles
-    └── app.js              # Frontend logic
+    ├── style.css                # Global styles
+    └── app.js                   # Frontend logic
 ```
 
 ---
@@ -53,8 +52,8 @@ social-media-post-generator/
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/ShadowWalkerNC/social-media-post-generator.git
-cd social-media-post-generator
+git clone https://github.com/ShadowWalkerNC/postpilot-pro.git
+cd postpilot-pro
 ```
 
 ### 2. Install dependencies

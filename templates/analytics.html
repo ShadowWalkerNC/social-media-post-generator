@@ -3,11 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Analytics Dashboard</title>
+    <title>PostPilot Pro — Analytics</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <nav><a href="/">← Home</a> | <a href="/generate">✏️ Generate</a> | <a href="/calendar">📅 Calendar</a></nav>
+    <nav>
+        <a href="/">🚀 PostPilot Pro</a> |
+        <a href="/generate">✏️ Generate</a> |
+        <a href="/calendar">📅 Calendar</a>
+    </nav>
     <div class="container">
         <div class="card">
             <h1>📊 Analytics Dashboard</h1>
@@ -18,14 +22,13 @@
     </div>
     <script>
         async function loadAnalytics() {
-            const res = await fetch('/api/analytics', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: 'default' })
+            const res  = await fetch('/api/analytics', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: 'default'})
             });
             const data = await res.json();
-            if (!data.success) { alert('Connect Facebook first'); return; }
-            let html = `<div class="best-post">🏆 Best Post This Week: <strong>${data.best_post?.message || 'N/A'}</strong> — ${data.best_post?.reach || 0} reach</div>`;
+            if (!data.success) { alert('Connect Facebook first to view analytics.'); return; }
+            let html = `<div class="best-post">🏆 Best Post: <strong>${data.best_post?.message || 'N/A'}</strong> — ${data.best_post?.reach || 0} reach</div>`;
             html += '<table class="data-table"><thead><tr><th>Post</th><th>Likes</th><th>Reach</th><th>Engaged</th></tr></thead><tbody>';
             for (const p of (data.posts || [])) {
                 html += `<tr><td>${p.message}</td><td>${p.likes}</td><td>${p.reach}</td><td>${p.engaged}</td></tr>`;

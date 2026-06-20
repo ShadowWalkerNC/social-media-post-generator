@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Setup Your Business</title>
+    <title>PostPilot Pro — Setup</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <nav><a href="/">← Home</a></nav>
+    <nav><a href="/">← PostPilot Pro</a></nav>
     <div class="container">
         <div class="card">
             <h1>📋 Setup Your Business</h1>
-            <p class="subtitle">Enter your details once. We handle the rest.</p>
+            <p class="subtitle">Enter your details once. PostPilot Pro handles the rest.</p>
             <form id="setupForm">
                 <div class="form-group">
                     <label>Business Type</label>
@@ -23,26 +23,11 @@
                         <option value="food_company">🍳 Food Company</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>Business Name</label>
-                    <input type="text" id="businessName" placeholder="e.g. Taco Revolution" required>
-                </div>
-                <div class="form-group">
-                    <label>Location / Address</label>
-                    <input type="text" id="location" placeholder="e.g. Downtown, 12th & Main" required>
-                </div>
-                <div class="form-group">
-                    <label>Hours</label>
-                    <input type="text" id="hours" placeholder="e.g. 11 AM - 8 PM" required>
-                </div>
-                <div class="form-group">
-                    <label>City</label>
-                    <input type="text" id="city" placeholder="e.g. Portland" required>
-                </div>
-                <div class="form-group">
-                    <label>Signature Item</label>
-                    <input type="text" id="specialItem" placeholder="e.g. Bacon BBQ Burger" required>
-                </div>
+                <div class="form-group"><label>Business Name</label><input type="text" id="businessName" placeholder="e.g. Taco Revolution" required></div>
+                <div class="form-group"><label>Location / Address</label><input type="text" id="location" placeholder="e.g. Downtown, 12th & Main" required></div>
+                <div class="form-group"><label>Hours</label><input type="text" id="hours" placeholder="e.g. 11 AM – 8 PM" required></div>
+                <div class="form-group"><label>City</label><input type="text" id="city" placeholder="e.g. Portland" required></div>
+                <div class="form-group"><label>Signature Item</label><input type="text" id="specialItem" placeholder="e.g. Bacon BBQ Burger" required></div>
                 <div class="form-group">
                     <label>Custom Hashtags <span class="optional">(optional — space separated)</span></label>
                     <input type="text" id="hashtags" placeholder="e.g. #portlandeats #foodtruck #tacos">
@@ -50,37 +35,33 @@
                 <button type="submit" class="btn btn-full">Save & Continue →</button>
             </form>
         </div>
-
         <div class="card card-connect">
             <h2>🔑 Connect Facebook & Instagram</h2>
-            <p>Connect once to publish and schedule posts directly from this tool.</p>
+            <p>Connect once to publish and schedule posts directly from PostPilot Pro.</p>
             <a href="/auth/facebook" class="btn btn-facebook">📘 Connect with Facebook</a>
             <p class="help">Requires: pages_manage_posts, instagram_content_publish</p>
         </div>
     </div>
-
     <script>
         document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const hashtagsRaw = document.getElementById('hashtags').value;
-            const hashtags = hashtagsRaw ? hashtagsRaw.split(' ').filter(h => h.startsWith('#')) : [];
+            const raw = document.getElementById('hashtags').value;
             const info = {
                 business_type: document.getElementById('businessType').value,
                 business_name: document.getElementById('businessName').value,
-                location: document.getElementById('location').value,
-                hours: document.getElementById('hours').value,
-                city: document.getElementById('city').value,
-                special_item: document.getElementById('specialItem').value,
-                hashtags
+                location:      document.getElementById('location').value,
+                hours:         document.getElementById('hours').value,
+                city:          document.getElementById('city').value,
+                special_item:  document.getElementById('specialItem').value,
+                hashtags: raw ? raw.split(' ').filter(h => h.startsWith('#')) : []
             };
             const res = await fetch('/api/setup_business', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: 'default', business_info: info })
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: 'default', business_info: info})
             });
             const result = await res.json();
-            if (result.success) { window.location.href = '/generate'; }
-            else { alert('Error: ' + result.message); }
+            if (result.success) window.location.href = '/generate';
+            else alert('Error: ' + result.message);
         });
     </script>
 </body>

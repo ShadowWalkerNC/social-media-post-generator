@@ -3,26 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generate Posts</title>
+    <title>PostPilot Pro — Generate</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <nav><a href="/">← Home</a> | <a href="/calendar">📅 Calendar</a> | <a href="/analytics">📊 Analytics</a></nav>
+    <nav>
+        <a href="/">🚀 PostPilot Pro</a> |
+        <a href="/calendar">📅 Calendar</a> |
+        <a href="/analytics">📊 Analytics</a> |
+        <a href="/setup">⚙️ Setup</a>
+    </nav>
     <div class="container">
         <div class="card">
-            <h1>🚀 Generate Your Posts</h1>
+            <h1>✏️ Generate Posts</h1>
             <div class="tabs">
                 <button class="tab active" onclick="switchTab('weekly', this)">📅 Weekly Schedule</button>
                 <button class="tab" onclick="switchTab('single', this)">✏️ Single Post</button>
             </div>
-
             <div id="weekly" class="tab-content">
-                <p class="hint">Generate 7 days of optimized posts — location, menu, engagement, team, and giveaway.</p>
+                <p class="hint">Generate 7 days of optimised posts — location, menu, engagement, team, and giveaway.</p>
                 <button class="btn btn-success" onclick="generateWeekly()">⚡ Generate Week of Posts</button>
                 <button class="btn btn-secondary" onclick="bulkSchedule()">📅 Bulk Schedule to Meta</button>
                 <div id="weeklyResult"></div>
             </div>
-
             <div id="single" class="tab-content" style="display:none">
                 <div class="form-group">
                     <label>Template</label>
@@ -39,7 +42,6 @@
             </div>
         </div>
     </div>
-
     <script src="/static/app.js"></script>
 </body>
 </html>
