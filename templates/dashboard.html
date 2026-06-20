@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostPilot Pro — Command Center</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-left">
+            <span class="logo-text">🚀 PostPilot Pro</span>
+            <span class="tag">Command Center</span>
+        </div>
+        <div class="topbar-right">
+            <div class="platform-status" id="platformStatus">
+                <span class="pill" id="pill-fb">📘 FB</span>
+                <span class="pill" id="pill-ig">📸 IG</span>
+                <span class="pill" id="pill-tt">🎵 TT</span>
+                <span class="pill" id="pill-gb">📍 GB</span>
+                <span class="pill" id="pill-web">🌐 WEB</span>
+            </div>
+            <a href="/setup" class="btn btn-sm">⚙️ Settings</a>
+        </div>
+    </header>
+
+    <div class="dashboard">
+
+        <!-- LEFT: Compose Panel -->
+        <aside class="compose-panel">
+            <h2>✏️ Compose Update</h2>
+            <p class="hint">Write once — push to all platforms instantly.</p>
+
+            <div class="form-group">
+                <label>Message / Caption</label>
+                <textarea id="mainCaption" rows="5" placeholder="e.g. 🔥 Today's special: BBQ Brisket Tacos — open 11 AM at Downtown Corner! Come get yours before we sell out."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label>Image URL <span class="optional">(optional)</span></label>
+                <input type="text" id="imageUrl" placeholder="https://yoursite.com/photo.jpg">
+            </div>
+
+            <div class="form-group">
+                <label>Link URL <span class="optional">(for website + Google)</span></label>
+                <input type="text" id="linkUrl" placeholder="https://yourwebsite.com/specials">
+            </div>
+
+            <div class="form-group">
+                <label>Push To</label>
+                <div class="platform-toggles">
+                    <label class="toggle-item">
+                        <input type="checkbox" id="tog-fb" checked> 📘 Facebook
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="tog-ig" checked> 📸 Instagram
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="tog-tt"> 🎵 TikTok Script
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="tog-gb"> 📍 Google Business
+                    </label>
+                    <label class="toggle-item">
+                        <input type="checkbox" id="tog-web"> 🌐 Website Banner
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Schedule <span class="optional">(leave blank = publish now)</span></label>
+                <input type="datetime-local" id="scheduleTime">
+            </div>
+
+            <button class="btn btn-success btn-full" onclick="pushToAll()">🚀 Push to All Selected Platforms</button>
+            <button class="btn btn-secondary btn-full" style="margin-top:10px" onclick="autoGenerate()">✨ Auto-Generate Caption</button>
+        </aside>
+
+        <!-- CENTER: Live Preview -->
+        <main class="preview-panel">
+            <h2>👁️ Live Preview</h2>
+            <div class="preview-tabs">
+                <button class="ptab active" onclick="switchPreview('fb', this)">📘 Facebook</button>
+                <button class="ptab" onclick="switchPreview('ig', this)">📸 Instagram</button>
+                <button class="ptab" onclick="switchPreview('tt', this)">🎵 TikTok</button>
+                <button class="ptab" onclick="switchPreview('gb', this)">📍 Google</button>
+                <button class="ptab" onclick="switchPreview('web', this)">🌐 Website</button>
+            </div>
+
+            <div id="preview-fb" class="preview-frame">
+                <div class="mock-fb">
+                    <div class="mock-header"><div class="mock-avatar">🏪</div><div><strong id="prev-fb-name">Your Business</strong><br><small>Just now · 🌍</small></div></div>
+                    <p id="prev-fb-text" class="mock-body">Your post will preview here…</p>
+                    <div id="prev-fb-img" class="mock-img" style="display:none"><img id="prev-fb-imgEl" src="" alt="Post image"></div>
+                    <div class="mock-actions"><span>👍 Like</span><span>💬 Comment</span><span>↗️ Share</span></div>
+                </div>
+            </div>
+
+            <div id="preview-ig" class="preview-frame" style="display:none">
+                <div class="mock-ig">
+                    <div class="mock-header"><div class="mock-avatar">🏪</div><strong id="prev-ig-name">yourbusiness</strong></div>
+                    <div id="prev-ig-img" class="mock-img"><div class="mock-img-placeholder">📷 Image Preview</div></div>
+                    <div class="mock-ig-actions">❤️ &nbsp; 💬 &nbsp; ✈️ &nbsp; 🔖</div>
+                    <p id="prev-ig-text" class="mock-body">Your caption will preview here…</p>
+                </div>
+            </div>
+
+            <div id="preview-tt" class="preview-frame" style="display:none">
+                <div class="mock-tt">
+                    <h3>🎵 TikTok Script</h3>
+                    <div id="prev-tt-text" class="script-box">Your TikTok script will appear here…</div>
+                    <p class="hint">Read this on camera for a 15–30 sec TikTok video.</p>
+                </div>
+            </div>
+
+            <div id="preview-gb" class="preview-frame" style="display:none">
+                <div class="mock-gb">
+                    <h3>📍 Google Business Post</h3>
+                    <div class="gb-card">
+                        <div id="prev-gb-img" class="mock-img-placeholder">📷 Photo</div>
+                        <p id="prev-gb-text">Your Google Business update will appear here…</p>
+                        <a id="prev-gb-link" class="gb-btn" href="#">Learn More</a>
+                    </div>
+                </div>
+            </div>
+
+            <div id="preview-web" class="preview-frame" style="display:none">
+                <div class="mock-web">
+                    <h3>🌐 Website Banner</h3>
+                    <div class="web-banner">
+                        <div id="prev-web-text">📣 Your website announcement will appear here…</div>
+                        <a id="prev-web-link" class="web-cta" href="#">View Details →</a>
+                    </div>
+                    <p class="hint">This embeds as a banner at the top of your website via a JS snippet.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- RIGHT: Activity Feed -->
+        <aside class="activity-panel">
+            <h2>📋 Activity Feed</h2>
+            <div id="activityFeed" class="feed">
+                <div class="feed-item feed-info">Welcome to PostPilot Pro Command Center. Compose a post and push to all your platforms in one click.</div>
+            </div>
+
+            <hr style="margin: 20px 0">
+
+            <h2>📊 Quick Stats</h2>
+            <div class="stats-grid" id="statsGrid">
+                <div class="stat-card"><div class="stat-num" id="stat-posts">—</div><div class="stat-label">Posts This Week</div></div>
+                <div class="stat-card"><div class="stat-num" id="stat-reach">—</div><div class="stat-label">Total Reach</div></div>
+                <div class="stat-card"><div class="stat-num" id="stat-likes">—</div><div class="stat-label">Total Likes</div></div>
+                <div class="stat-card"><div class="stat-num" id="stat-platforms">0/5</div><div class="stat-label">Platforms Live</div></div>
+            </div>
+
+            <hr style="margin: 20px 0">
+
+            <h2>⚡ Quick Actions</h2>
+            <div class="quick-actions">
+                <button class="btn btn-sm btn-full" onclick="autoGenerate()">✨ Auto-Generate</button>
+                <button class="btn btn-sm btn-full btn-secondary" onclick="window.location='/calendar'">📅 View Calendar</button>
+                <button class="btn btn-sm btn-full btn-secondary" onclick="window.location='/analytics'">📊 Full Analytics</button>
+                <button class="btn btn-sm btn-full btn-secondary" onclick="loadWeeklyPlan()">📋 Load Weekly Plan</button>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

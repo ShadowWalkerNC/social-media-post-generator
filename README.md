@@ -1,21 +1,79 @@
 # 🚀 PostPilot Pro
 
-**Automated social media post generator for food trucks, restaurants, hotels, cafes, and food companies.**
+**One-page command center — write one update, push it to Facebook, Instagram, TikTok, Google Business, and your website simultaneously.**
 
-Generates high-engagement posts and publishes directly to **Facebook & Instagram** via the Meta Graph API.
+Built for food trucks, restaurants, hotels, cafes, and food companies.
 
 ---
 
-## ✨ Features
+## ✨ What It Does
 
-- 📝 **Auto-generate posts** — 7 days of posts in 1 click
-- 📘 **Publish to Facebook** — Direct posting via Facebook Pages API
-- 📸 **Publish to Instagram** — Direct posting via Instagram Graph API
-- 📅 **Post Scheduler** — Schedule posts for future dates/times
-- 📊 **Analytics Dashboard** — Track likes, comments, and reach
-- 🖥️ **Web GUI** — No coding needed; run in your browser
-- 🎯 **5 Business Types** — Food truck, restaurant, hotel, cafe, food company
-- 🔁 **9 Post Templates** — Location, menu, engagement, team, giveaway, TikTok script, email, and more
+Write a single post in the Command Center. Check the platforms you want. Hit **Push to All**.
+
+PostPilot Pro automatically:
+- 📘 Posts to **Facebook** (text + photo, with scheduling)
+- 📸 Posts to **Instagram** (photo + caption, with scheduling)
+- 🎵 Generates a ready-to-record **TikTok script**
+- 📍 Creates a **Google Business** post
+- 🌐 Updates a **website banner** on your site (via 1-line embed)
+
+All from one screen. No switching between apps.
+
+---
+
+## 🖥️ The Command Center
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 🚀 PostPilot Pro                    📘✅ 📸✅ 🎵✅ 📍❌ 🌐✅  │
+├──────────────────┬──────────────────────────┬───────────────────┤
+│ ✏️ COMPOSE       │ 👁️ LIVE PREVIEW           │ 📋 ACTIVITY FEED  │
+│                  │                          │                   │
+│ Caption textarea │ [FB] [IG] [TT] [GB] [WEB]│ ✅ FB Published   │
+│ Image URL        │                          │ ✅ IG Published   │
+│ Link URL         │  ┌─────────────────────┐ │ 🎵 TT Script ready│
+│                  │  │ Mock post preview   │ │                   │
+│ ☑ Facebook       │  │ for selected tab    │ │ 📊 QUICK STATS    │
+│ ☑ Instagram      │  └─────────────────────┘ │ 7 posts / 2.4k    │
+│ ☐ TikTok         │                          │ reach / 143 likes │
+│ ☐ Google         │                          │                   │
+│ ☑ Website        │                          │ ⚡ QUICK ACTIONS  │
+│                  │                          │ [Generate][Cal]   │
+│ [🚀 Push All]    │                          │                   │
+└──────────────────┴──────────────────────────┴───────────────────┘
+```
+
+---
+
+## 🚀 Quick Start
+
+```bash
+git clone https://github.com/ShadowWalkerNC/social-media-post-generator.git
+cd social-media-post-generator
+pip install -r requirements.txt
+cp .env.example .env   # add your API keys
+python app.py
+# open http://localhost:5000
+```
+
+---
+
+## 🔌 Platform Setup
+
+| Platform | How to Connect | Docs |
+|----------|---------------|------|
+| **Facebook** | Click "Connect Facebook" in Setup | [developers.facebook.com](https://developers.facebook.com/apps/) |
+| **Instagram** | Same OAuth as Facebook | [graph.facebook.com](https://developers.facebook.com/docs/instagram-api/) |
+| **TikTok** | Script-only now; full API in Phase 4 | [developers.tiktok.com](https://developers.tiktok.com/) |
+| **Google Business** | Click "Connect Google" in Setup | [console.cloud.google.com](https://console.cloud.google.com/) |
+| **Website** | Add 1 line to your site's `<head>` | See below |
+
+### Website Banner — 1-Line Setup
+```html
+<!-- Add this to your website's <head> tag -->
+<script src="https://YOUR-APP-URL/static/embed.js"></script>
+```
+Every time you push a website update in PostPilot Pro, your banner updates automatically.
 
 ---
 
@@ -23,126 +81,38 @@ Generates high-engagement posts and publishes directly to **Facebook & Instagram
 
 ```
 postpilot-pro/
-│
-├── app.py                       # Flask main app (GUI + API routes)
-├── requirements.txt             # Python dependencies
-├── .env.example                 # Environment variables template
-│
+├── app.py                     # Flask app — all routes
 ├── modules/
-│   ├── post_generator.py        # Post generation logic
-│   ├── meta_client.py           # Facebook/Instagram API integration
-│   ├── post_scheduler.py        # Post scheduling logic
-│   └── analytics_client.py     # Analytics fetching
-│
+│   ├── publisher.py           # 🆕 Universal push to all platforms
+│   ├── post_generator.py      # Post generation logic
+│   ├── meta_client.py         # Facebook + Instagram API
+│   ├── post_scheduler.py      # APScheduler integration
+│   └── analytics_client.py   # Meta Insights API
 ├── templates/
-│   ├── index.html               # Home / landing page
-│   ├── setup.html               # Business setup form
-│   ├── generate.html            # Generate & publish posts
-│   ├── calendar.html            # Visual content calendar
-│   └── analytics.html          # Analytics dashboard
-│
+│   ├── dashboard.html         # 🆕 One-page command center
+│   ├── index.html             # Landing page
+│   ├── setup.html             # Business + token setup
+│   ├── generate.html          # Bulk post generator
+│   ├── calendar.html          # Content calendar
+│   └── analytics.html        # Analytics dashboard
 └── static/
-    ├── style.css                # Global styles
-    └── app.js                   # Frontend logic
+    ├── dashboard.css          # 🆕 Command center styles
+    ├── dashboard.js           # 🆕 Command center logic
+    ├── embed.js               # 🆕 Website banner embed
+    ├── banner.json            # 🆕 Live banner data
+    ├── style.css
+    └── app.js
 ```
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone the repo
-```bash
-git clone https://github.com/ShadowWalkerNC/postpilot-pro.git
-cd postpilot-pro
-```
-
-### 2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set up environment variables
-```bash
-cp .env.example .env
-# Edit .env with your Meta App ID and Secret
-```
-
-### 4. Run the app
-```bash
-python app.py
-```
-
-### 5. Open in browser
-```
-http://localhost:5000
-```
-
----
-
-## 🔑 Meta API Setup
-
-1. Go to [developers.facebook.com](https://developers.facebook.com/apps/)
-2. Create a new App → Select **Business** type
-3. Add **Instagram Graph API** product
-4. Request permissions:
-   - `pages_manage_posts`
-   - `pages_read_engagement`
-   - `instagram_content_publish`
-5. Add your `APP_ID` and `APP_SECRET` to `.env`
-6. Click **Connect Facebook** in the app → OAuth flow handles the rest
-
----
-
-## 📱 Supported Platforms
-
-| Platform | Post Types | Scheduling |
-|----------|------------|------------|
-| Instagram | Photo, Carousel, Reel | ✅ |
-| Facebook | Photo, Text, Link | ✅ |
-| TikTok | Script generator | Coming soon |
-| Email | Subject + body templates | Coming soon |
-
----
-
-## 🏢 Business Types
-
-| Type | Templates | Auto-Hashtags |
-|------|-----------|---------------|
-| Food Truck | Location, Menu, Engagement, Team, Giveaway | #cityeats #foodtruck |
-| Restaurant | Location, Menu, Engagement, Team, Giveaway | #cityeats #finedining |
-| Hotel | Location, Room, Engagement, Staff, Giveaway | #cityhotel #luxurytravel |
-| Cafe | Location, Menu, Engagement, Team, Giveaway | #cityeats #cafe |
-| Food Company | Product, Launch, Engagement, Team, Giveaway | #organicfood #foodie |
-
----
-
-## 📅 Weekly Schedule (Auto-Generated)
-
-| Day | Platform | Template | Time |
-|-----|----------|----------|------|
-| Monday | Instagram | Location | 8 AM |
-| Tuesday | Instagram | Menu | 11 AM |
-| Wednesday | Instagram | Engagement | 5 PM |
-| Thursday | Instagram | Team | 8 AM |
-| Friday | Facebook | Giveaway | 11 AM |
-| Saturday | Instagram | Location | 8 AM |
-| Sunday | Instagram | Poll | 5 PM |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [x] Phase 1 — GUI + Facebook/Instagram API
+- [x] Phase 1 — Facebook + Instagram API + GUI
 - [x] Phase 2 — Scheduler + Calendar + Analytics
-- [ ] Phase 3 — Multi-user SaaS with login & billing
-- [ ] Phase 4 — AI caption generation + image suggestions
-- [ ] Phase 5 — TikTok + Google Business integration
-
----
-
-## 🤝 Contributing
-
-Pull requests welcome! Please open an issue first to discuss what you'd like to change.
+- [x] Phase 3 — One-page command center + Google Business + Website banner
+- [ ] Phase 4 — TikTok full auto-post + AI captions + image suggestions
+- [ ] Phase 5 — Multi-user SaaS with login, billing, and team accounts
 
 ---
 
