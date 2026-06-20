@@ -2,5 +2,9 @@ flask==3.0.0
 requests==2.31.0
 python-dotenv==1.0.0
 apscheduler==3.10.4
-flask-sqlalchemy==3.1.1
 gunicorn==21.2.0
+flask-login==0.6.3
+bcrypt==4.1.2
+cryptography==42.0.5
+stripe==8.11.0
+werkzeug==3.0.1

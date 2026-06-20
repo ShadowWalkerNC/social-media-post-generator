@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Billing — PostPilot Pro</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117; color: #e5e7eb;
+      min-height: 100vh; padding: 2rem 1rem;
+    }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.6rem; font-weight: 700; color: #fff; margin-bottom: .3rem; }
+    .sub-heading { color: #6b7280; font-size: .9rem; margin-bottom: 2rem; }
+
+    /* ── Payment failed banner ────────────────────────────────── */
+    .alert {
+      background: #2d1f1f; border: 1px solid #7f1d1d;
+      border-radius: 10px; padding: 1rem 1.25rem;
+      color: #fca5a5; font-size: .9rem;
+      display: flex; align-items: center; gap: .75rem;
+      margin-bottom: 1.5rem;
+    }
+    .alert a { color: #f87171; font-weight: 600; }
+
+    /* ── Current plan card ─────────────────────────────────────── */
+    .current-plan {
+      background: #1a1d27; border: 1px solid #2a2d3e;
+      border-radius: 14px; padding: 1.5rem;
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .plan-name { font-size: 1.2rem; font-weight: 700; color: #fff; }
+    .plan-status {
+      display: inline-block;
+      padding: .25rem .75rem; border-radius: 99px;
+      font-size: .75rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .status-active   { background: #14532d; color: #86efac; }
+    .status-past_due { background: #7f1d1d; color: #fca5a5; }
+    .status-cancelled{ background: #1c1c2e; color: #9ca3af; }
+    .plan-meta { color: #6b7280; font-size: .85rem; margin-top: .3rem; }
+    .portal-btn {
+      padding: .6rem 1.2rem;
+      background: #1f2937; border: 1px solid #374151;
+      color: #d1d5db; border-radius: 8px;
+      font-size: .875rem; font-weight: 600;
+      cursor: pointer; text-decoration: none;
+      transition: background .15s;
+    }
+    .portal-btn:hover { background: #374151; }
+
+    /* ── Annual toggle ───────────────────────────────────────────── */
+    .toggle-row {
+      display: flex; align-items: center; gap: 1rem;
+      justify-content: center; margin-bottom: 1.5rem;
+    }
+    .toggle-label { color: #9ca3af; font-size: .9rem; }
+    .toggle-label.active { color: #fff; font-weight: 600; }
+    .save-badge {
+      background: #14532d; color: #86efac;
+      font-size: .72rem; font-weight: 700;
+      padding: .15rem .5rem; border-radius: 99px;
+      letter-spacing: .3px;
+    }
+    .toggle {
+      position: relative; width: 44px; height: 24px;
+      background: #374151; border-radius: 99px;
+      cursor: pointer; transition: background .2s;
+      border: none; outline: none;
+      flex-shrink: 0;
+    }
+    .toggle.on { background: #6366f1; }
+    .toggle::after {
+      content: ''; position: absolute;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #fff; top: 3px; left: 3px;
+      transition: transform .2s;
+    }
+    .toggle.on::after { transform: translateX(20px); }
+
+    /* ── Plan grid ────────────────────────────────────────────────── */
+    .plans {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem; margin-bottom: 2.5rem;
+    }
+    .plan-card {
+      background: #1a1d27; border: 1px solid #2a2d3e;
+      border-radius: 14px; padding: 1.5rem;
+      display: flex; flex-direction: column; gap: .5rem;
+      transition: border-color .2s;
+      position: relative;
+    }
+    .plan-card:hover { border-color: #6366f1; }
+    .plan-card.current-card {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 1px #6366f1;
+    }
+    .plan-card.popular::before {
+      content: 'POPULAR';
+      position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff; font-size: .65rem; font-weight: 700;
+      padding: .2rem .7rem; border-radius: 99px;
+      letter-spacing: .5px;
+    }
+    .plan-tier { font-size: .75rem; font-weight: 700; color: #6366f1;
+                 text-transform: uppercase; letter-spacing: .5px; }
+    .plan-price { font-size: 1.8rem; font-weight: 800; color: #fff; }
+    .plan-price span { font-size: .9rem; color: #6b7280; font-weight: 400; }
+    .plan-desc { color: #6b7280; font-size: .8rem; margin-bottom: .5rem; }
+    .plan-features { list-style: none; display: flex; flex-direction: column; gap: .35rem;
+                     font-size: .82rem; color: #d1d5db; flex-grow: 1; }
+    .plan-features li::before { content: '✓ '; color: #6366f1; font-weight: 700; }
+    .plan-features li.locked { color: #374151; }
+    .plan-features li.locked::before { content: '− '; color: #374151; }
+    .upgrade-btn {
+      display: block; width: 100%;
+      padding: .65rem; margin-top: .75rem;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff; font-size: .875rem; font-weight: 600;
+      border: none; border-radius: 8px;
+      cursor: pointer; transition: opacity .15s; text-align: center;
+      text-decoration: none;
+    }
+    .upgrade-btn:hover { opacity: .88; }
+    .upgrade-btn.current-btn {
+      background: #1f2937; color: #9ca3af;
+      cursor: default; pointer-events: none;
+    }
+    .upgrade-btn.downgrade-btn {
+      background: transparent; color: #6b7280;
+      border: 1px solid #374151;
+    }
+    .upgrade-btn.downgrade-btn:hover { background: #1f2937; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>💳 Billing &amp; Plan</h1>
+  <p class="sub-heading">Manage your PostPilot Pro subscription.</p>
+
+  <!-- Payment failed banner -->
+  {% if sub_info.sub_status == 'past_due' %}
+  <div class="alert">
+    <span>⚠️</span>
+    <span>
+      Your last payment failed and some features are locked.
+      <a href="/billing/portal">Update your payment method →</a>
+    </span>
+  </div>
+  {% endif %}
+
+  <!-- Cancel-at-period-end notice -->
+  {% if sub_info.cancel_at_period_end %}
+  <div class="alert" style="border-color:#78350f;background:#2d1f0a;color:#fde68a">
+    <span>📅</span>
+    <span>
+      Your plan is cancelled and will end on
+      <strong>{{ sub_info.period_end[:10] if sub_info.period_end else 'end of period' }}</strong>.
+      <a href="/billing/portal" style="color:#fbbf24">Reactivate →</a>
+    </span>
+  </div>
+  {% endif %}
+
+  <!-- Current plan card -->
+  <div class="current-plan">
+    <div>
+      <div class="plan-name">
+        {{ sub_info.tier | capitalize }} Plan
+        <span class="plan-status status-{{ sub_info.sub_status }}">
+          {{ sub_info.sub_status | replace('_', ' ') }}
+        </span>
+      </div>
+      {% if sub_info.period_end %}
+      <div class="plan-meta">
+        Next billing date: {{ sub_info.period_end[:10] }}
+      </div>
+      {% endif %}
+    </div>
+    <a href="/billing/portal" class="portal-btn">⚙️ Manage Plan</a>
+  </div>
+
+  <!-- Annual / monthly toggle -->
+  <div class="toggle-row">
+    <span class="toggle-label" id="lbl-monthly">Monthly</span>
+    <button class="toggle" id="billing-toggle" onclick="toggleBilling()"></button>
+    <span class="toggle-label" id="lbl-annual">
+      Annual <span class="save-badge">SAVE 2 MONTHS</span>
+    </span>
+  </div>
+
+  <!-- Plan cards -->
+  <div class="plans">
+
+    <!-- Starter -->
+    <div class="plan-card {% if current_tier == 'starter' %}current-card{% endif %}">
+      <div class="plan-tier">Starter</div>
+      <div class="plan-price monthly-price">$15<span>/mo</span></div>
+      <div class="plan-price annual-price" style="display:none">$12.50<span>/mo</span></div>
+      <div class="plan-desc">Solo operator — all 6 platforms</div>
+      <ul class="plan-features">
+        <li>All 6 platforms</li>
+        <li>30 AI captions/mo</li>
+        <li>Unlimited scheduling</li>
+        <li>Basic analytics</li>
+        <li class="locked">Weekly Planner</li>
+        <li class="locked">API access</li>
+      </ul>
+      {% if current_tier == 'starter' %}
+        <a class="upgrade-btn current-btn">Current Plan</a>
+      {% elif current_tier in ('growth', 'pro', 'agency') %}
+        <a href="/billing/checkout?plan=starter_monthly" class="upgrade-btn downgrade-btn" data-monthly="/billing/checkout?plan=starter_monthly" data-annual="/billing/checkout?plan=starter_annual">Downgrade</a>
+      {% else %}
+        <a href="/billing/checkout?plan=starter_monthly" class="upgrade-btn" data-monthly="/billing/checkout?plan=starter_monthly" data-annual="/billing/checkout?plan=starter_annual">Upgrade →</a>
+      {% endif %}
+    </div>
+
+    <!-- Growth -->
+    <div class="plan-card popular {% if current_tier == 'growth' %}current-card{% endif %}">
+      <div class="plan-tier">Growth</div>
+      <div class="plan-price monthly-price">$35<span>/mo</span></div>
+      <div class="plan-price annual-price" style="display:none">$29<span>/mo</span></div>
+      <div class="plan-desc">Restaurant / cafe + helper</div>
+      <ul class="plan-features">
+        <li>All 6 platforms</li>
+        <li>150 AI captions/mo</li>
+        <li>Full 90-day analytics</li>
+        <li>Weekly Planner</li>
+        <li>API (1k calls/day)</li>
+        <li>Review Alerts</li>
+      </ul>
+      {% if current_tier == 'growth' %}
+        <a class="upgrade-btn current-btn">Current Plan</a>
+      {% elif current_tier in ('pro', 'agency') %}
+        <a href="/billing/checkout?plan=growth_monthly" class="upgrade-btn downgrade-btn" data-monthly="/billing/checkout?plan=growth_monthly" data-annual="/billing/checkout?plan=growth_annual">Downgrade</a>
+      {% else %}
+        <a href="/billing/checkout?plan=growth_monthly" class="upgrade-btn" data-monthly="/billing/checkout?plan=growth_monthly" data-annual="/billing/checkout?plan=growth_annual">Upgrade →</a>
+      {% endif %}
+    </div>
+
+    <!-- Pro -->
+    <div class="plan-card {% if current_tier == 'pro' %}current-card{% endif %}">
+      <div class="plan-tier">Pro</div>
+      <div class="plan-price monthly-price">$69<span>/mo</span></div>
+      <div class="plan-price annual-price" style="display:none">$57<span>/mo</span></div>
+      <div class="plan-desc">Multi-location + white-label</div>
+      <ul class="plan-features">
+        <li>All 6 platforms</li>
+        <li>Unlimited AI captions</li>
+        <li>3 seats</li>
+        <li>White-label website</li>
+        <li>Custom domain</li>
+        <li>API (10k calls/day)</li>
+      </ul>
+      {% if current_tier == 'pro' %}
+        <a class="upgrade-btn current-btn">Current Plan</a>
+      {% elif current_tier == 'agency' %}
+        <a href="/billing/checkout?plan=pro_monthly" class="upgrade-btn downgrade-btn" data-monthly="/billing/checkout?plan=pro_monthly" data-annual="/billing/checkout?plan=pro_annual">Downgrade</a>
+      {% else %}
+        <a href="/billing/checkout?plan=pro_monthly" class="upgrade-btn" data-monthly="/billing/checkout?plan=pro_monthly" data-annual="/billing/checkout?plan=pro_annual">Upgrade →</a>
+      {% endif %}
+    </div>
+
+    <!-- Agency -->
+    <div class="plan-card {% if current_tier == 'agency' %}current-card{% endif %}">
+      <div class="plan-tier">Agency</div>
+      <div class="plan-price monthly-price">$249<span>/mo</span></div>
+      <div class="plan-price annual-price" style="display:none">$207<span>/mo</span></div>
+      <div class="plan-desc">Resell to 25 clients</div>
+      <ul class="plan-features">
+        <li>25 client accounts</li>
+        <li>Unlimited AI captions</li>
+        <li>White-label branding</li>
+        <li>Bulk posting</li>
+        <li>API unlimited</li>
+        <li>Priority support</li>
+      </ul>
+      {% if current_tier == 'agency' %}
+        <a class="upgrade-btn current-btn">Current Plan</a>
+      {% else %}
+        <a href="/billing/checkout?plan=agency_monthly" class="upgrade-btn" data-monthly="/billing/checkout?plan=agency_monthly" data-annual="/billing/checkout?plan=agency_annual">Upgrade →</a>
+      {% endif %}
+    </div>
+
+  </div><!-- /plans -->
+</div><!-- /container -->
+
+<script>
+  const currentTier = '{{ current_tier }}';
+  let isAnnual = false;
+
+  function toggleBilling() {
+    isAnnual = !isAnnual;
+    const toggle = document.getElementById('billing-toggle');
+    toggle.classList.toggle('on', isAnnual);
+    document.getElementById('lbl-monthly').classList.toggle('active', !isAnnual);
+    document.getElementById('lbl-annual').classList.toggle('active', isAnnual);
+
+    document.querySelectorAll('.monthly-price').forEach(el => el.style.display = isAnnual ? 'none' : '');
+    document.querySelectorAll('.annual-price').forEach(el => el.style.display = isAnnual ? '' : 'none');
+
+    // Swap checkout URLs on all plan buttons
+    document.querySelectorAll('.upgrade-btn[data-monthly]').forEach(btn => {
+      btn.href = isAnnual ? btn.dataset.annual : btn.dataset.monthly;
+    });
+  }
+
+  // Set monthly active on load
+  document.getElementById('lbl-monthly').classList.add('active');
+</script>
+</body>
+</html>

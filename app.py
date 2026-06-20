@@ -3,7 +3,6 @@
 PostPilot Pro — Smart Content Hub
 Write once → smart routing sends videos to video platforms,
 text to text platforms, images to image platforms.
-All from one page.
 """
 
 import os
@@ -22,6 +21,7 @@ from modules.post_scheduler    import PostScheduler
 from modules.analytics_client  import Analytics
 from modules.publisher         import UniversalPublisher
 from modules.user_manager      import UserManager, User
+from modules.billing_manager   import BillingManager
 
 load_dotenv()
 
@@ -30,17 +30,15 @@ app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-secret-change-me')
 
 # ── Flask-Login ──────────────────────────────────────────────────────────
 login_manager = LoginManager(app)
-login_manager.login_view     = 'login'
-login_manager.login_message  = 'Please sign in to access PostPilot Pro.'
+login_manager.login_view    = 'login'
+login_manager.login_message = 'Please sign in to access PostPilot Pro.'
 
 @login_manager.user_loader
 def load_user(user_id: str):
     return UserManager.get_user(user_id)
 
 
-# ── Per-request token cache (memory only — refreshed from DB each request) ─
-# Kept for backwards-compat with existing OAuth callbacks
-user_sessions = {}
+user_sessions = {}   # in-memory token cache, keyed by user UUID
 
 
 # ── AUTH ROUTES ───────────────────────────────────────────────────────────
@@ -65,7 +63,6 @@ def register():
             return render_template('register.html')
         login_user(user, remember=True)
         UserManager.touch_login(user.id)
-        flash('Account created! Let\'s get you set up.', 'success')
         return redirect(url_for('onboarding'))
     return render_template('register.html')
 
@@ -83,8 +80,7 @@ def login():
             return render_template('login.html')
         login_user(user, remember=True)
         UserManager.touch_login(user.id)
-        next_page = request.args.get('next') or url_for('home')
-        return redirect(next_page)
+        return redirect(request.args.get('next') or url_for('home'))
     return render_template('login.html')
 
 
@@ -94,6 +90,64 @@ def logout():
     logout_user()
     flash('You have been signed out.', 'success')
     return redirect(url_for('login'))
+
+
+# ── BILLING ROUTES ────────────────────────────────────────────────────────
+
+@app.route('/billing')
+@login_required
+def billing():
+    sub_info     = BillingManager.get_subscription_info(current_user.id)
+    current_tier = current_user.subscription_tier
+    return render_template('billing.html', sub_info=sub_info, current_tier=current_tier)
+
+
+@app.route('/billing/checkout')
+@login_required
+def billing_checkout():
+    plan        = request.args.get('plan', '')
+    base        = request.host_url.rstrip('/')
+    success_url = f'{base}/billing?upgraded=1'
+    cancel_url  = f'{base}/billing'
+    url         = BillingManager.create_checkout_session(
+        current_user.id, plan, success_url, cancel_url
+    )
+    if not url:
+        flash('Could not start checkout. Please try again.')
+        return redirect(url_for('billing'))
+    return redirect(url)
+
+
+@app.route('/billing/portal')
+@login_required
+def billing_portal():
+    base       = request.host_url.rstrip('/')
+    return_url = f'{base}/billing'
+    url        = BillingManager.create_customer_portal_session(current_user.id, return_url)
+    if not url:
+        flash('Could not open billing portal. Please contact support.')
+        return redirect(url_for('billing'))
+    return redirect(url)
+
+
+@app.route('/billing/cancel', methods=['POST'])
+@login_required
+def billing_cancel():
+    ok = BillingManager.cancel_subscription(current_user.id)
+    if ok:
+        flash('Your plan will cancel at the end of the billing period. You keep access until then.', 'success')
+    else:
+        flash('Could not cancel. Please use Manage Plan or contact support.')
+    return redirect(url_for('billing'))
+
+
+@app.route('/webhooks/stripe', methods=['POST'])
+def stripe_webhook():
+    """Stripe sends events here. Must be public (no @login_required)."""
+    payload    = request.data
+    sig_header = request.headers.get('Stripe-Signature', '')
+    body, code = BillingManager.handle_webhook(payload, sig_header)
+    return jsonify(body), code
 
 
 # ── PAGE ROUTES ───────────────────────────────────────────────────────────
@@ -126,20 +180,13 @@ def analytics_page():
 @app.route('/onboarding')
 @login_required
 def onboarding():
-    """First-run guided setup wizard (Phase 4 Session 6)."""
     return render_template('onboarding.html')
 
 
-# ── HELPER: resolve user_id ────────────────────────────────────────────────
+# ── HELPER ────────────────────────────────────────────────────────────────
+
 def _uid() -> str:
-    """
-    Return the current user's ID.
-    Falls back to 'default' for any API call that still passes user_id
-    explicitly (backwards-compat with old single-user clients).
-    """
-    if current_user.is_authenticated:
-        return current_user.id
-    return 'default'
+    return current_user.id if current_user.is_authenticated else 'default'
 
 
 # ── CORE: UNIVERSAL PUSH ─────────────────────────────────────────────────
@@ -161,7 +208,6 @@ def api_push_all():
         schedule_time = data.get('schedule_time'),
         web_data      = data.get('web_data'),
     )
-    # Log to post_history
     UserManager.log_post(
         user_id      = uid,
         caption      = data.get('caption', ''),
@@ -179,9 +225,6 @@ def api_push_all():
 @app.route('/api/publish', methods=['POST'])
 @login_required
 def api_publish():
-    """
-    Alias for /api/push_all used by the onboarding wizard first-post flow.
-    """
     data      = request.json
     uid       = _uid()
     tokens    = user_sessions.get(uid, {}).get('tokens', {})
@@ -211,13 +254,8 @@ def api_publish():
 @app.route('/api/onboarding/setup', methods=['POST'])
 @login_required
 def api_onboarding_setup():
-    """
-    Saves business info submitted at Step 1 of the onboarding wizard.
-    Persists to business_profiles table via UserManager.
-    """
     data = request.json or {}
     uid  = _uid()
-
     business_info = {
         'name':          data.get('name', ''),
         'business_type': data.get('type', ''),
@@ -225,17 +263,12 @@ def api_onboarding_setup():
         'hours':         data.get('hours', ''),
         'prompt_time':   data.get('prompt_time', '07:00'),
     }
-
-    # Persist to business_profiles DB table
     UserManager.save_business_profile(uid, business_info)
-
-    # Keep in-memory session for post generator
     user_sessions.setdefault(uid, {})
     user_sessions[uid]['business'] = business_info
     gen = user_sessions[uid].get('generator', SocialMediaPostGenerator())
     gen.setup_business(business_info)
     user_sessions[uid]['generator'] = gen
-
     return jsonify({'success': True, 'business': business_info})
 
 
@@ -310,8 +343,7 @@ def api_generate_post():
 @app.route('/api/schedule_post', methods=['POST'])
 @login_required
 def api_schedule_post():
-    data = request.json
-    return jsonify(PostScheduler().schedule(data))
+    return jsonify(PostScheduler().schedule(request.json))
 
 
 @app.route('/api/analytics', methods=['POST'])
@@ -328,7 +360,7 @@ def api_analytics():
     return jsonify(Analytics(token, page_id).get_weekly_summary())
 
 
-# ── OAUTH: META ──────────────────────────────────────────────────────────
+# ── OAUTH: META ────────────────────────────────────────────────────────
 
 @app.route('/auth/facebook')
 @login_required
@@ -336,15 +368,10 @@ def auth_facebook():
     app_id       = os.getenv('FACEBOOK_APP_ID')
     redirect_uri = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
     scopes       = 'pages_manage_posts,pages_read_engagement,instagram_content_publish,instagram_basic'
-    next_url     = request.args.get('next', '/')
-    step         = request.args.get('step', '2')
-    session['oauth_next']     = next_url
-    session['oauth_step']     = step
+    session['oauth_next'] = request.args.get('next', '/')
+    session['oauth_step'] = request.args.get('step', '2')
     session['oauth_platform'] = 'facebook'
-    return redirect(
-        f'https://www.facebook.com/v19.0/dialog/oauth?client_id={app_id}'
-        f'&redirect_uri={redirect_uri}&scope={scopes}'
-    )
+    return redirect(f'https://www.facebook.com/v19.0/dialog/oauth?client_id={app_id}&redirect_uri={redirect_uri}&scope={scopes}')
 
 
 @app.route('/auth/facebook/callback')
@@ -355,38 +382,28 @@ def auth_facebook_callback():
     app_id     = os.getenv('FACEBOOK_APP_ID')
     app_secret = os.getenv('FACEBOOK_APP_SECRET')
     redir      = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
-    token      = req.get(
-        'https://graph.facebook.com/v19.0/oauth/access_token',
-        params={'client_id': app_id, 'client_secret': app_secret,
-                'redirect_uri': redir, 'code': code}
-    ).json().get('access_token')
-    page       = req.get(
-        'https://graph.facebook.com/v19.0/me/accounts',
-        params={'access_token': token}
-    ).json().get('data', [{}])[0]
+    token      = req.get('https://graph.facebook.com/v19.0/oauth/access_token',
+                         params={'client_id': app_id, 'client_secret': app_secret,
+                                 'redirect_uri': redir, 'code': code}).json().get('access_token')
+    page       = req.get('https://graph.facebook.com/v19.0/me/accounts',
+                         params={'access_token': token}).json().get('data', [{}])[0]
     page_id    = page.get('id')
     page_token = page.get('access_token', token)
-    ig_id      = req.get(
-        f'https://graph.facebook.com/v19.0/{page_id}',
-        params={'fields': 'instagram_business_account', 'access_token': page_token}
-    ).json().get('instagram_business_account', {}).get('id')
-
+    ig_id      = req.get(f'https://graph.facebook.com/v19.0/{page_id}',
+                         params={'fields': 'instagram_business_account',
+                                 'access_token': page_token}).json()\
+                    .get('instagram_business_account', {}).get('id')
     uid = _uid()
     user_sessions.setdefault(uid, {})
     user_sessions[uid].setdefault('tokens', {}).update(
         facebook_token=page_token, facebook_page_id=page_id,
-        instagram_token=page_token, instagram_id=ig_id
-    )
-    # Persist via auth_manager
+        instagram_token=page_token, instagram_id=ig_id)
     from modules.auth_manager import save_token
     save_token('facebook', page_token, meta={'page_id': page_id, 'ig_id': ig_id}, user_id=uid)
-
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '2')
     platform = session.pop('oauth_platform', 'facebook')
-    if next_url == '/onboarding':
-        return redirect(f'/onboarding?connected={platform}&step={step}')
-    return redirect(url_for('home'))
+    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
 
 
 # ── OAUTH: GOOGLE ────────────────────────────────────────────────────────
@@ -396,62 +413,45 @@ def auth_facebook_callback():
 def auth_google():
     client_id = os.getenv('GOOGLE_CLIENT_ID')
     redir     = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
-    scope     = ('https://www.googleapis.com/auth/business.manage '
-                 'https://www.googleapis.com/auth/youtube.upload')
-    next_url  = request.args.get('next', '/')
-    step      = request.args.get('step', '3')
-    session['oauth_next']     = next_url
-    session['oauth_step']     = step
+    scope     = 'https://www.googleapis.com/auth/business.manage https://www.googleapis.com/auth/youtube.upload'
+    session['oauth_next'] = request.args.get('next', '/')
+    session['oauth_step'] = request.args.get('step', '3')
     session['oauth_platform'] = 'google'
-    return redirect(
-        f'https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}'
-        f'&redirect_uri={redir}&response_type=code&scope={scope}&access_type=offline'
-    )
+    return redirect(f'https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redir}&response_type=code&scope={scope}&access_type=offline')
 
 
 @app.route('/auth/google/callback')
 @login_required
 def auth_google_callback():
     import requests as req
-    code   = request.args.get('code')
-    cid    = os.getenv('GOOGLE_CLIENT_ID')
-    csec   = os.getenv('GOOGLE_CLIENT_SECRET')
-    redir  = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
-    tokens = req.post(
-        'https://oauth2.googleapis.com/token',
-        data={'code': code, 'client_id': cid, 'client_secret': csec,
-              'redirect_uri': redir, 'grant_type': 'authorization_code'}
-    ).json()
+    from modules.auth_manager import save_token
+    from datetime import datetime, timedelta
+    code    = request.args.get('code')
+    cid     = os.getenv('GOOGLE_CLIENT_ID')
+    csec    = os.getenv('GOOGLE_CLIENT_SECRET')
+    redir   = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
+    tokens  = req.post('https://oauth2.googleapis.com/token',
+                       data={'code': code, 'client_id': cid, 'client_secret': csec,
+                             'redirect_uri': redir, 'grant_type': 'authorization_code'}).json()
     gtoken  = tokens.get('access_token')
     rtoken  = tokens.get('refresh_token')
-    accts   = req.get(
-        'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
-        headers={'Authorization': f'Bearer {gtoken}'}
-    ).json()
+    accts   = req.get('https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+                      headers={'Authorization': f'Bearer {gtoken}'}).json()
     acct    = (accts.get('accounts') or [{}])[0].get('name', '')
-    locs    = req.get(
-        f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
-        headers={'Authorization': f'Bearer {gtoken}'}
-    ).json()
+    locs    = req.get(f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
+                      headers={'Authorization': f'Bearer {gtoken}'}).json()
     loc_id  = (locs.get('locations') or [{}])[0].get('name', '')
-
     uid = _uid()
     user_sessions.setdefault(uid, {})
     user_sessions[uid].setdefault('tokens', {}).update(
-        google_token=gtoken, google_location_id=loc_id, youtube_token=gtoken
-    )
-    from modules.auth_manager import save_token
-    from datetime import datetime, timedelta
+        google_token=gtoken, google_location_id=loc_id, youtube_token=gtoken)
     save_token('google', gtoken, refresh_token=rtoken,
                expires_at=datetime.utcnow() + timedelta(hours=1),
                meta={'location_id': loc_id}, user_id=uid)
-
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '3')
     platform = session.pop('oauth_platform', 'google')
-    if next_url == '/onboarding':
-        return redirect(f'/onboarding?connected={platform}&step={step}')
-    return redirect(url_for('home'))
+    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
 
 
 # ── OAUTH: TIKTOK ────────────────────────────────────────────────────────
@@ -462,48 +462,37 @@ def auth_tiktok():
     client_key = os.getenv('TIKTOK_CLIENT_KEY')
     redir      = os.getenv('TIKTOK_REDIRECT_URI', 'http://localhost:5000/auth/tiktok/callback')
     scope      = 'user.info.basic,video.upload,video.publish'
-    next_url   = request.args.get('next', '/')
-    step       = request.args.get('step', '4')
-    session['oauth_next']     = next_url
-    session['oauth_step']     = step
+    session['oauth_next'] = request.args.get('next', '/')
+    session['oauth_step'] = request.args.get('step', '4')
     session['oauth_platform'] = 'tiktok'
-    return redirect(
-        f'https://www.tiktok.com/v2/auth/authorize?client_key={client_key}'
-        f'&redirect_uri={redir}&response_type=code&scope={scope}'
-    )
+    return redirect(f'https://www.tiktok.com/v2/auth/authorize?client_key={client_key}&redirect_uri={redir}&response_type=code&scope={scope}')
 
 
 @app.route('/auth/tiktok/callback')
 @login_required
 def auth_tiktok_callback():
     import requests as req
+    from modules.auth_manager import save_token
+    from datetime import datetime, timedelta
     code   = request.args.get('code')
     ckey   = os.getenv('TIKTOK_CLIENT_KEY')
     csec   = os.getenv('TIKTOK_CLIENT_SECRET')
     redir  = os.getenv('TIKTOK_REDIRECT_URI', 'http://localhost:5000/auth/tiktok/callback')
-    tokens = req.post(
-        'https://open.tiktokapis.com/v2/oauth/token/',
-        data={'client_key': ckey, 'client_secret': csec, 'code': code,
-              'grant_type': 'authorization_code', 'redirect_uri': redir},
-        headers={'Content-Type': 'application/x-www-form-urlencoded'}
-    ).json()
+    tokens = req.post('https://open.tiktokapis.com/v2/oauth/token/',
+                      data={'client_key': ckey, 'client_secret': csec, 'code': code,
+                            'grant_type': 'authorization_code', 'redirect_uri': redir},
+                      headers={'Content-Type': 'application/x-www-form-urlencoded'}).json()
     tt_token  = tokens.get('access_token')
     tt_rtoken = tokens.get('refresh_token')
-
     uid = _uid()
     user_sessions.setdefault(uid, {})
     user_sessions[uid].setdefault('tokens', {}).update(tiktok_token=tt_token)
-    from modules.auth_manager import save_token
-    from datetime import datetime, timedelta
     save_token('tiktok', tt_token, refresh_token=tt_rtoken,
                expires_at=datetime.utcnow() + timedelta(hours=24), user_id=uid)
-
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '4')
     platform = session.pop('oauth_platform', 'tiktok')
-    if next_url == '/onboarding':
-        return redirect(f'/onboarding?connected={platform}&step={step}')
-    return redirect(url_for('home'))
+    return redirect(f'/onboarding?connected={platform}&step={step}' if next_url == '/onboarding' else url_for('home'))
 
 
 if __name__ == '__main__':
