@@ -1,7 +1,7 @@
 """
-auth_manager.py — Token Persistence, Refresh & Expiry
+auth_manager.py -- Token Persistence, Refresh & Expiry
 
-Handles Fernet-encrypted token storage via db.py (SQLite dev / Postgres prod).
+Handles Fernet-encrypted token storage via modules.db (SQLite dev / PostgreSQL prod).
 Auto-refreshes Google and TikTok tokens.
 """
 
@@ -22,17 +22,15 @@ logger = logging.getLogger(__name__)
 ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY')
 if not ENCRYPTION_KEY:
     ENCRYPTION_KEY = Fernet.generate_key().decode()
-    logger.warning('TOKEN_ENCRYPTION_KEY not set — ephemeral key generated (dev only)')
+    logger.warning('TOKEN_ENCRYPTION_KEY not set -- generated ephemeral key (dev only)')
 
-fernet = Fernet(
-    ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
-)
+fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
 
 # ---------------------------------------------------------------------------
 # DDL
 # ---------------------------------------------------------------------------
-_CREATE_TOKENS = adapt_schema('''
+CREATE_TOKENS_TABLE = adapt_schema('''
     CREATE TABLE IF NOT EXISTS platform_tokens (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id       TEXT    NOT NULL DEFAULT 'default',
@@ -52,18 +50,21 @@ def init_db():
     conn = get_connection()
     try:
         cur = conn.cursor()
-        cur.execute(_CREATE_TOKENS)
+        cur.execute(CREATE_TOKENS_TABLE)
         conn.commit()
-        logger.info('auth_manager: platform_tokens ready')
-    except Exception as exc:
-        logger.error('auth_manager init_db failed: %s', exc)
-        conn.rollback()
+        logger.info('auth_manager: platform_tokens table ready')
+    except Exception as e:
+        logger.error('auth_manager init_db failed: %s', e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     finally:
         conn.close()
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Encrypt / decrypt
 # ---------------------------------------------------------------------------
 def _encrypt(value: str) -> str:
     return fernet.encrypt(value.encode()).decode()
@@ -71,13 +72,6 @@ def _encrypt(value: str) -> str:
 
 def _decrypt(value: str) -> str:
     return fernet.decrypt(value.encode()).decode()
-
-
-def _unpack_row(row) -> tuple:
-    """Return (access_token, refresh_token, expires_at, token_meta) from either backend."""
-    if isinstance(row, dict):
-        return row['access_token'], row['refresh_token'], row['expires_at'], row['token_meta']
-    return row[0], row[1], row[2], row[3]
 
 
 # ---------------------------------------------------------------------------
@@ -123,9 +117,12 @@ def save_token(platform: str, access_token: str, refresh_token: str = None,
         cur.execute(sql, (user_id, platform, enc_access, enc_refresh, expires_str, meta_str, now))
         conn.commit()
         logger.info('Token saved: platform=%s user=%s', platform, user_id)
-    except Exception as exc:
-        logger.error('save_token failed: %s', exc)
-        conn.rollback()
+    except Exception as e:
+        logger.error('save_token failed: %s', e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
     finally:
         conn.close()
 
@@ -154,7 +151,14 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
     if not row:
         return None
 
-    a, r, e, m = _unpack_row(row)
+    if isinstance(row, dict):
+        a = row['access_token']
+        r = row['refresh_token']
+        e = row['expires_at']
+        m = row['token_meta']
+    else:
+        a, r, e, m = row[0], row[1], row[2], row[3]
+
     return {
         'access_token':  _decrypt(a),
         'refresh_token': _decrypt(r) if r else None,
@@ -192,7 +196,7 @@ def get_all_token_statuses(user_id: str = 'default') -> dict:
 def refresh_google_token(user_id: str = 'default') -> str | None:
     token = load_token('google', user_id)
     if not token or not token['refresh_token']:
-        logger.error('Cannot refresh Google token — no refresh_token stored')
+        logger.error('Cannot refresh Google token -- no refresh_token stored')
         return None
     resp = requests.post('https://oauth2.googleapis.com/token', data={
         'grant_type':    'refresh_token',
@@ -228,7 +232,7 @@ def get_valid_google_token(user_id: str = 'default') -> str | None:
 def refresh_tiktok_token(user_id: str = 'default') -> str | None:
     token = load_token('tiktok', user_id)
     if not token or not token['refresh_token']:
-        logger.error('Cannot refresh TikTok token — no refresh_token stored')
+        logger.error('Cannot refresh TikTok token -- no refresh_token stored')
         return None
     resp = requests.post('https://open.tiktokapis.com/v2/oauth/token/', json={
         'client_key':    os.environ.get('TIKTOK_CLIENT_KEY'),
@@ -253,16 +257,16 @@ def refresh_tiktok_token(user_id: str = 'default') -> str | None:
 # Delete token
 # ---------------------------------------------------------------------------
 def delete_token(platform: str, user_id: str = 'default'):
-    p   = placeholder
-    sql = f'DELETE FROM platform_tokens WHERE user_id={p} AND platform={p}'
+    p    = placeholder
+    sql  = f'DELETE FROM platform_tokens WHERE user_id={p} AND platform={p}'
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(sql, (user_id, platform))
         conn.commit()
         logger.info('Token deleted: platform=%s user=%s', platform, user_id)
-    except Exception as exc:
-        logger.error('delete_token failed: %s', exc)
+    except Exception as e:
+        logger.error('delete_token failed: %s', e)
     finally:
         conn.close()
 
@@ -272,5 +276,5 @@ def delete_token(platform: str, user_id: str = 'default'):
 # ---------------------------------------------------------------------------
 try:
     init_db()
-except Exception as _e:
-    logger.error('auth_manager bootstrap failed: %s', _e)
+except Exception as e:
+    logger.error('auth_manager bootstrap failed: %s', e)
