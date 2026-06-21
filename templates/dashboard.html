@@ -10,155 +10,176 @@
       theme: {
         extend: {
           colors: {
-            brand:  { 400:'#818cf8', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' },
-            flame:  { 400:'#fb923c', 500:'#f97316', 600:'#ea580c' },
-            surface: {
-              50: '#f8f8ff',
-              900: '#0d0d24',
-              950: '#07071a',
-            }
+            brand:  { 300:'#a5b4fc', 400:'#818cf8', 500:'#6366f1', 600:'#4f46e5', 700:'#4338ca' },
+            flame:  { 300:'#fdba74', 400:'#fb923c', 500:'#f97316', 600:'#ea580c' },
           }
         }
       }
     }
   </script>
   <style>
-    /* Base */
-    html, body { height: 100%; overflow: hidden; }
-    body { background: #07071a; color: #f1f5f9; font-family: ui-sans-serif, system-ui, sans-serif; }
+    html, body { height:100%; overflow:hidden; }
+    body { background:#07071a; color:#f1f5f9; font-family:ui-sans-serif,system-ui,sans-serif; }
 
-    /* Scrollbars */
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 99px; }
+    ::-webkit-scrollbar { width:4px; height:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.08); border-radius:99px; }
 
-    /* Sidebar */
-    #sidebar { transition: width .25s cubic-bezier(.4,0,.2,1); }
-
-    /* Cards */
-    .card {
-      background: rgba(255,255,255,.03);
-      border: 1px solid rgba(255,255,255,.07);
-      border-radius: 1rem;
+    /* ---- SIDEBAR ---- */
+    #sidebar {
+      transition: width .25s cubic-bezier(.4,0,.2,1);
+      /* Match landing page: deep navy + subtle radial glow from top */
+      background: radial-gradient(ellipse 160% 40% at 50% 0%, rgba(99,102,241,.18) 0%, transparent 70%), #07071a;
+      border-right: 1px solid rgba(255,255,255,.06);
     }
-    .card-hover { transition: border-color .2s, box-shadow .2s; }
-    .card-hover:hover { border-color: rgba(99,102,241,.35); box-shadow: 0 8px 24px rgba(99,102,241,.1); }
+
+    /* Logo area gets a warm-glow bottom border like the landing page hero separator */
+    #sidebar-logo {
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      background: linear-gradient(180deg, rgba(99,102,241,.05) 0%, transparent 100%);
+    }
+
+    /* Business badge: matches landing page .tier-popular card style */
+    #business-badge {
+      background: rgba(99,102,241,.07);
+      border: 1px solid rgba(99,102,241,.18);
+      border-radius: .875rem;
+      transition: border-color .2s;
+    }
+    #business-badge:hover { border-color: rgba(99,102,241,.35); }
 
     /* Nav items */
     .nav-item {
-      display: flex; align-items: center; gap: .75rem;
-      padding: .6rem .75rem; border-radius: .75rem;
-      font-size: .875rem; font-weight: 500; color: #94a3b8;
-      cursor: pointer; transition: background .15s, color .15s;
-      white-space: nowrap; overflow: hidden;
+      display:flex; align-items:center; gap:.7rem;
+      padding:.55rem .75rem; border-radius:.75rem;
+      font-size:.8rem; font-weight:500; color:#64748b;
+      cursor:pointer; transition:background .15s, color .15s;
+      white-space:nowrap; overflow:hidden; position:relative;
     }
-    .nav-item:hover  { background: rgba(255,255,255,.05); color: #f1f5f9; }
-    .nav-item.active { background: rgba(99,102,241,.15); color: #818cf8; }
-    .nav-icon { flex-shrink: 0; width: 1.125rem; height: 1.125rem; }
-
-    /* Platform pills */
-    .plat-pill {
-      display: inline-flex; align-items: center; gap: .35rem;
-      font-size: .7rem; font-weight: 700; padding: .2rem .55rem;
-      border-radius: 99px; cursor: pointer; transition: opacity .15s;
-      border: 1px solid transparent;
+    .nav-item:hover { background:rgba(255,255,255,.04); color:#cbd5e1; }
+    /* Active: indigo left-bar + background, matches landing page active CTA */
+    .nav-item.active {
+      background: rgba(99,102,241,.12);
+      color: #818cf8;
+      box-shadow: inset 3px 0 0 #6366f1;
     }
-    .plat-pill.on  { opacity: 1; }
-    .plat-pill.off { opacity: .35; }
+    .nav-item.active .nav-icon { color:#818cf8; }
+    .nav-icon { flex-shrink:0; width:1rem; height:1rem; color:#475569; transition:color .15s; }
+    .nav-item:hover .nav-icon { color:#94a3b8; }
 
-    /* Content type tabs */
+    /* Section divider label */
+    .nav-section {
+      padding:.75rem .75rem .35rem;
+      font-size:.65rem; font-weight:700;
+      text-transform:uppercase; letter-spacing:.08em;
+      color:rgba(255,255,255,.18);
+    }
+
+    /* Platform rows in sidebar */
+    .plat-row {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:.3rem .5rem; border-radius:.5rem;
+      transition:background .15s; cursor:default;
+    }
+    .plat-row:hover { background:rgba(255,255,255,.03); }
+    .plat-dot {
+      width:.55rem; height:.55rem; border-radius:99px; flex-shrink:0;
+      transition:box-shadow .3s;
+    }
+    .plat-dot.connected { box-shadow:0 0 6px currentColor; }
+
+    /* Connect button: flame accent, matches landing page CTA style */
+    #connectBtn {
+      background: rgba(249,115,22,.08);
+      border: 1px solid rgba(249,115,22,.2);
+      color: #fb923c;
+      border-radius:.75rem; font-size:.72rem; font-weight:700;
+      padding:.5rem; width:100%; cursor:pointer;
+      transition:background .15s, border-color .15s;
+    }
+    #connectBtn:hover {
+      background:rgba(249,115,22,.14);
+      border-color:rgba(249,115,22,.35);
+    }
+
+    /* ---- TOP BAR ---- */
+    #topbar {
+      background: rgba(7,7,26,.85);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+
+    /* ---- REST (unchanged) ---- */
+    .card { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:1rem; }
+    .card-hover { transition:border-color .2s,box-shadow .2s; }
+    .card-hover:hover { border-color:rgba(99,102,241,.35); box-shadow:0 8px 24px rgba(99,102,241,.1); }
+
     .ctype-btn {
-      padding: .4rem .85rem; border-radius: .6rem; font-size: .8rem; font-weight: 600;
-      cursor: pointer; border: 1px solid rgba(255,255,255,.08);
-      background: rgba(255,255,255,.03); color: #94a3b8;
-      transition: background .15s, color .15s, border-color .15s;
+      padding:.4rem .85rem; border-radius:.6rem; font-size:.8rem; font-weight:600;
+      cursor:pointer; border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.03); color:#94a3b8;
+      transition:background .15s,color .15s,border-color .15s;
     }
-    .ctype-btn.active {
-      background: rgba(99,102,241,.2); color: #818cf8;
-      border-color: rgba(99,102,241,.4);
-    }
+    .ctype-btn.active { background:rgba(99,102,241,.2); color:#818cf8; border-color:rgba(99,102,241,.4); }
 
-    /* Preview tabs */
     .prev-tab {
-      padding: .4rem .8rem; font-size: .75rem; font-weight: 600; border-radius: .5rem;
-      cursor: pointer; color: #64748b; transition: background .15s, color .15s;
+      padding:.4rem .8rem; font-size:.75rem; font-weight:600; border-radius:.5rem;
+      cursor:pointer; color:#64748b; transition:background .15s,color .15s;
     }
-    .prev-tab.active { background: rgba(255,255,255,.07); color: #f1f5f9; }
+    .prev-tab.active { background:rgba(255,255,255,.07); color:#f1f5f9; }
 
-    /* Social mock cards */
-    .mock-post { background: #fff; color: #111; border-radius: .75rem; overflow: hidden; font-size: .8rem; }
-    .mock-post.dark { background: #1c1c2e; color: #f1f5f9; }
+    .mock-post { background:#fff; color:#111; border-radius:.75rem; overflow:hidden; font-size:.8rem; }
+    .mock-post.dark { background:#1c1c2e; color:#f1f5f9; }
 
-    /* Feed items */
-    .feed-item {
-      padding: .6rem .75rem; border-radius: .6rem; font-size: .78rem; line-height: 1.5;
-      border-left: 3px solid transparent; margin-bottom: .4rem;
-    }
-    .feed-ok   { background: rgba(34,197,94,.07);  border-color: #22c55e; color: #86efac; }
-    .feed-warn { background: rgba(249,115,22,.07); border-color: #f97316; color: #fdba74; }
-    .feed-info { background: rgba(99,102,241,.07); border-color: #6366f1; color: #a5b4fc; }
+    .feed-item { padding:.6rem .75rem; border-radius:.6rem; font-size:.78rem; line-height:1.5; border-left:3px solid transparent; margin-bottom:.4rem; }
+    .feed-ok   { background:rgba(34,197,94,.07);  border-color:#22c55e; color:#86efac; }
+    .feed-warn { background:rgba(249,115,22,.07); border-color:#f97316; color:#fdba74; }
+    .feed-info { background:rgba(99,102,241,.07); border-color:#6366f1; color:#a5b4fc; }
 
-    /* Textarea / input */
     .pp-input {
-      width: 100%; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-      border-radius: .65rem; padding: .6rem .85rem; color: #f1f5f9; font-size: .875rem;
-      outline: none; transition: border-color .15s;
-      resize: vertical;
+      width:100%; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+      border-radius:.65rem; padding:.6rem .85rem; color:#f1f5f9; font-size:.875rem;
+      outline:none; transition:border-color .15s; resize:vertical;
     }
-    .pp-input:focus { border-color: rgba(99,102,241,.5); }
-    .pp-input::placeholder { color: #475569; }
+    .pp-input:focus { border-color:rgba(99,102,241,.5); }
+    .pp-input::placeholder { color:#475569; }
 
-    /* Buttons */
     .btn-primary {
-      background: linear-gradient(135deg,#6366f1,#4f46e5);
-      box-shadow: 0 4px 14px rgba(99,102,241,.4);
-      color: #fff; font-weight: 700; border-radius: .75rem;
-      padding: .7rem 1.25rem; font-size: .875rem; cursor: pointer;
-      border: none; width: 100%; transition: opacity .15s;
+      background:linear-gradient(135deg,#6366f1,#4f46e5);
+      box-shadow:0 4px 14px rgba(99,102,241,.4);
+      color:#fff; font-weight:700; border-radius:.75rem;
+      padding:.7rem 1.25rem; font-size:.875rem; cursor:pointer;
+      border:none; width:100%; transition:opacity .15s;
     }
-    .btn-primary:hover { opacity: .9; }
+    .btn-primary:hover { opacity:.9; }
     .btn-secondary {
-      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
-      color: #cbd5e1; font-weight: 600; border-radius: .75rem;
-      padding: .65rem 1.25rem; font-size: .875rem; cursor: pointer;
-      width: 100%; transition: background .15s;
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+      color:#cbd5e1; font-weight:600; border-radius:.75rem;
+      padding:.65rem 1.25rem; font-size:.875rem; cursor:pointer;
+      width:100%; transition:background .15s;
     }
-    .btn-secondary:hover { background: rgba(255,255,255,.09); }
+    .btn-secondary:hover { background:rgba(255,255,255,.09); }
     .btn-ghost {
-      background: transparent; border: none; color: #64748b;
-      font-size: .8rem; cursor: pointer; padding: .35rem .65rem;
-      border-radius: .5rem; transition: background .15s, color .15s;
+      background:transparent; border:none; color:#64748b;
+      font-size:.8rem; cursor:pointer; padding:.35rem .65rem;
+      border-radius:.5rem; transition:background .15s,color .15s;
     }
-    .btn-ghost:hover { background: rgba(255,255,255,.05); color: #f1f5f9; }
+    .btn-ghost:hover { background:rgba(255,255,255,.05); color:#f1f5f9; }
 
-    /* Stat cards */
-    .stat-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); border-radius: .75rem; padding: .9rem 1rem; }
+    .stat-card { background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:.75rem; padding:.9rem 1rem; }
 
-    /* Routing toggle row */
-    .route-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: .45rem .5rem; border-radius: .5rem; transition: background .15s;
-    }
-    .route-row:hover { background: rgba(255,255,255,.03); }
+    .route-row { display:flex; align-items:center; justify-content:space-between; padding:.45rem .5rem; border-radius:.5rem; transition:background .15s; }
+    .route-row:hover { background:rgba(255,255,255,.03); }
     .toggle-switch { position:relative; width:34px; height:18px; flex-shrink:0; }
     .toggle-switch input { opacity:0; width:0; height:0; }
-    .toggle-track {
-      position:absolute; inset:0; border-radius:99px; background:rgba(255,255,255,.1);
-      transition: background .2s; cursor:pointer;
-    }
-    .toggle-thumb {
-      position:absolute; top:2px; left:2px; width:14px; height:14px;
-      border-radius:99px; background:#fff; transition:transform .2s;
-    }
+    .toggle-track { position:absolute; inset:0; border-radius:99px; background:rgba(255,255,255,.1); transition:background .2s; cursor:pointer; }
+    .toggle-thumb { position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:99px; background:#fff; transition:transform .2s; }
     .toggle-switch input:checked ~ .toggle-track { background:#6366f1; }
     .toggle-switch input:checked ~ .toggle-track .toggle-thumb { transform:translateX(16px); }
 
-    /* Toast */
     #toastContainer { position:fixed; bottom:1.5rem; right:1.5rem; z-index:999; display:flex; flex-direction:column; gap:.5rem; }
-    .toast {
-      padding:.7rem 1.1rem; border-radius:.75rem; font-size:.82rem; font-weight:600;
-      animation: slideIn .3s ease; min-width:220px;
-    }
+    .toast { padding:.7rem 1.1rem; border-radius:.75rem; font-size:.82rem; font-weight:600; animation:slideIn .3s ease; min-width:220px; }
     .toast-ok   { background:#16a34a; color:#fff; }
     .toast-err  { background:#dc2626; color:#fff; }
     .toast-info { background:#6366f1; color:#fff; }
@@ -167,60 +188,108 @@
 </head>
 <body class="flex h-screen overflow-hidden">
 
-<!-- ============================== SIDEBAR ============================== -->
-<aside id="sidebar" class="flex flex-col flex-shrink-0 overflow-hidden"
-       style="width:220px;background:#0a0a1e;border-right:1px solid rgba(255,255,255,.06)">
+<!-- ===================== SIDEBAR ===================== -->
+<aside id="sidebar" class="flex flex-col flex-shrink-0 overflow-hidden" style="width:224px">
 
   <!-- Logo -->
-  <div class="flex items-center gap-2.5 px-4 py-5 border-b" style="border-color:rgba(255,255,255,.05)">
-    <div class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0"
-         style="background:linear-gradient(135deg,#6366f1,#f97316)">✈️</div>
-    <span class="font-black text-sm tracking-tight">Post<span class="text-brand-400">-</span>Pilot</span>
+  <div id="sidebar-logo" class="flex items-center gap-2.5 px-4 py-4">
+    <!-- Gradient icon matches landing page exactly -->
+    <div class="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0 shadow-lg"
+         style="background:linear-gradient(135deg,#6366f1,#f97316);box-shadow:0 4px 12px rgba(99,102,241,.35)">
+      <svg viewBox="0 0 24 24" fill="white" class="w-4 h-4">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="font-black text-sm tracking-tight leading-none">
+        Post<span class="text-brand-400">-</span>Pilot
+      </div>
+      <div class="text-xs text-gray-600 leading-none mt-0.5">Content Hub</div>
+    </div>
   </div>
 
   <!-- Business badge -->
-  <div class="mx-3 mt-3 mb-1 px-3 py-2.5 rounded-xl" style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.15)">
-    <div class="text-xs text-gray-500 mb-0.5">Active business</div>
+  <div id="business-badge" class="mx-3 mt-3 mb-1 px-3 py-2.5">
+    <div class="flex items-center justify-between mb-0.5">
+      <span class="text-xs text-gray-600">Active business</span>
+      <!-- Flame dot = active/live indicator -->
+      <span class="flex items-center gap-1 text-xs text-flame-400 font-semibold">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-400" style="box-shadow:0 0 5px #4ade80"></span>
+        Live
+      </span>
+    </div>
     <div class="text-sm font-bold text-white truncate">{{ business_name or 'Your Business' }}</div>
-    <div class="text-xs text-brand-400 mt-0.5">{{ tier_label or 'Free Plan' }}</div>
+    <!-- Plan badge — matches landing page pricing chip style -->
+    <span class="inline-flex items-center mt-1 text-xs px-2 py-0.5 rounded-full font-bold"
+          style="background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.25)">
+      {{ tier_label or 'Free Plan' }}
+    </span>
   </div>
 
   <!-- Nav -->
-  <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
+  <nav class="flex-1 overflow-y-auto px-2 pt-3 pb-1">
+
+    <!-- Main pages -->
     <div class="nav-item active" onclick="window.location='/dashboard'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+      </svg>
       Dashboard
     </div>
+
     <div class="nav-item" onclick="window.location='/calendar'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
       Calendar
     </div>
+
     <div class="nav-item" onclick="window.location='/analytics'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
       Analytics
     </div>
+
     <div class="nav-item" onclick="window.location='/websites'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+      </svg>
       Website Hub
     </div>
 
-    <div class="pt-3 pb-1 px-2">
-      <span class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Account</span>
-    </div>
+    <!-- Divider -->
+    <div class="nav-section">Account</div>
+
     <div class="nav-item" onclick="window.location='/billing'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
+      </svg>
       Billing
     </div>
+
     <div class="nav-item" onclick="window.location='/setup'">
-      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
       Settings
     </div>
   </nav>
 
-  <!-- Platform status -->
-  <div class="px-3 pb-4">
-    <div class="text-xs text-gray-700 uppercase tracking-wider font-semibold px-1 mb-2">Platforms</div>
-    <div class="space-y-1.5">
+  <!-- Platform status panel -->
+  <!-- Separator matches landing page border style -->
+  <div class="mx-3 mb-3 pt-3" style="border-top:1px solid rgba(255,255,255,.05)">
+    <div class="text-xs font-bold uppercase tracking-wider mb-2 px-1"
+         style="color:rgba(255,255,255,.2)">Platforms</div>
+
+    <div class="space-y-1">
       {% for pid, name, color in [
         ('fb',  'Facebook',  '#1877F2'),
         ('ig',  'Instagram', '#E1306C'),
@@ -229,48 +298,63 @@
         ('gb',  'Google',    '#4285F4'),
         ('web', 'Website',   '#10b981'),
       ] %}
-      <div class="flex items-center justify-between px-1">
-        <span class="text-xs text-gray-400">{{ name }}</span>
-        <span class="w-2 h-2 rounded-full" id="status-{{ pid }}"
-              style="background:rgba(255,255,255,.15)" title="Not connected"></span>
+      <div class="plat-row">
+        <div class="flex items-center gap-2">
+          <!-- Colored platform dot matches landing page platform strip colors -->
+          <span class="plat-dot" id="status-{{ pid }}"
+                style="background:{{ color }};opacity:.3;color:{{ color }}" title="Not connected"></span>
+          <span class="text-xs text-gray-500">{{ name }}</span>
+        </div>
+        <span class="text-xs font-semibold" id="statuslabel-{{ pid }}"
+              style="color:rgba(255,255,255,.15)">—</span>
       </div>
       {% endfor %}
     </div>
-    <button class="mt-3 w-full text-xs text-brand-400 hover:text-brand-300 transition py-1.5 rounded-lg"
-            style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.15)"
-            onclick="window.location='/setup'">Connect Platforms</button>
+
+    <button id="connectBtn" class="mt-3" onclick="window.location='/setup'">
+      + Connect Platforms
+    </button>
   </div>
 </aside>
 
-<!-- ============================== MAIN AREA ============================== -->
+<!-- ===================== MAIN AREA ===================== -->
 <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
 
   <!-- Top bar -->
-  <header class="flex items-center justify-between px-5 py-3 flex-shrink-0"
-          style="background:#0a0a1e;border-bottom:1px solid rgba(255,255,255,.05)">
+  <header id="topbar" class="flex items-center justify-between px-5 py-3 flex-shrink-0">
     <div class="flex items-center gap-3">
-      <button class="btn-ghost p-2 rounded-lg" onclick="toggleSidebar()" title="Toggle sidebar">
+      <button class="btn-ghost p-1.5 rounded-lg" onclick="toggleSidebar()" title="Toggle sidebar">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
-      <h1 class="text-sm font-bold text-gray-200">Content Hub</h1>
+      <!-- Breadcrumb: matches landing page eyebrow text style -->
+      <div class="flex items-center gap-1.5 text-sm">
+        <span class="text-gray-600">Post-Pilot</span>
+        <span class="text-gray-700">/</span>
+        <span class="font-semibold text-gray-200">Content Hub</span>
+      </div>
     </div>
 
     <div class="flex items-center gap-3">
-      <!-- Scheduled count badge -->
-      <div class="hidden sm:flex items-center gap-1.5 text-xs text-gray-400 px-2.5 py-1.5 rounded-lg"
-           style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)">
-        <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-        <span id="scheduledCount">7 posts scheduled this week</span>
+      <!-- Scheduled badge: matches landing page live badge from hero -->
+      <div class="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full"
+           style="background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);color:#818cf8">
+        <span class="w-1.5 h-1.5 rounded-full bg-green-400" style="box-shadow:0 0 5px #4ade80"></span>
+        <span id="scheduledCount">7 posts scheduled</span>
       </div>
-      <button class="btn-ghost" onclick="autoGenerate()" title="Auto-generate caption">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+
+      <!-- AI generate bolt -->
+      <button class="btn-ghost p-1.5 rounded-lg" onclick="autoGenerate()" title="AI Generate">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
         </svg>
       </button>
-      <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
-           style="background:linear-gradient(135deg,#6366f1,#f97316)">U</div>
+
+      <!-- Avatar: matches landing page gradient avatar style -->
+      <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black cursor-pointer"
+           style="background:linear-gradient(135deg,#6366f1,#f97316);box-shadow:0 2px 8px rgba(99,102,241,.35)"
+           title="Account">U</div>
     </div>
   </header>
 
@@ -281,7 +365,6 @@
     <div class="flex flex-col w-80 flex-shrink-0 overflow-y-auto px-4 py-4 gap-4"
          style="border-right:1px solid rgba(255,255,255,.05)">
 
-      <!-- Content type -->
       <div>
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Content Type</label>
         <div class="flex flex-wrap gap-1.5">
@@ -296,14 +379,13 @@
         </div>
       </div>
 
-      <!-- Caption -->
       <div>
         <div class="flex items-center justify-between mb-1.5">
           <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Caption / Message</label>
           <button class="btn-ghost text-xs px-2 py-1" onclick="autoGenerate()">
             <svg class="w-3.5 h-3.5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-            </svg>AI Generate
+            </svg>AI
           </button>
         </div>
         <textarea id="mainCaption" class="pp-input" rows="5"
@@ -315,29 +397,25 @@
         </div>
       </div>
 
-      <!-- Media URL (image / video) -->
       <div id="mediaGroup">
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block" id="mediaLabel">Image URL</label>
         <input type="url" id="mediaUrl" class="pp-input" placeholder="https://…/photo.jpg" oninput="updatePreviews()" />
         <div id="videoGroup" class="mt-2 hidden">
-          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Video URL <span class="text-gray-700 normal-case font-normal">(YouTube / MP4)</span></label>
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Video URL</label>
           <input type="url" id="videoUrl" class="pp-input" placeholder="https://youtube.com/watch?v=…" oninput="updatePreviews()" />
         </div>
       </div>
 
-      <!-- Link -->
       <div>
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Link URL <span class="text-gray-700 normal-case font-normal">(optional)</span></label>
         <input type="url" id="linkUrl" class="pp-input" placeholder="https://yoursite.com/specials" oninput="updatePreviews()" />
       </div>
 
-      <!-- Schedule time -->
       <div>
         <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Schedule <span class="text-gray-700 normal-case font-normal">(blank = now)</span></label>
         <input type="datetime-local" id="scheduleTime" class="pp-input" />
       </div>
 
-      <!-- Platform routing -->
       <div>
         <div class="flex items-center justify-between mb-2">
           <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Smart Routing</label>
@@ -357,7 +435,6 @@
             <div class="flex items-center gap-2">
               <span class="w-2.5 h-2.5 rounded-full" style="background:{{ color }};flex-shrink:0"></span>
               <span class="text-sm text-gray-300">{{ name }}</span>
-              <span class="route-tag text-xs text-gray-600" id="rtag-{{ pid }}"></span>
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="tog-{{ pid }}" {{ 'checked' if pid=='web' else '' }} onchange="updatePreviews()">
@@ -368,7 +445,6 @@
         </div>
       </div>
 
-      <!-- Action buttons -->
       <div class="space-y-2 pb-4">
         <button class="btn-primary" onclick="pushToAll()">
           <svg class="w-4 h-4 inline mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -387,8 +463,6 @@
 
     <!-- ===== CENTER: PREVIEW ===== -->
     <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
-
-      <!-- Preview tab bar -->
       <div class="flex items-center gap-1 px-4 pt-4 pb-2 flex-shrink-0">
         {% for pid, label in [('fb','Facebook'),('ig','Instagram'),('tt','TikTok'),('yt','YouTube'),('gb','Google'),('web','Website')] %}
         <button class="prev-tab {{ 'active' if pid=='fb' else '' }}" id="ptab-{{ pid }}"
@@ -396,10 +470,8 @@
         {% endfor %}
       </div>
 
-      <!-- Preview panels -->
       <div class="flex-1 overflow-y-auto px-4 pb-4">
 
-        <!-- Facebook -->
         <div id="preview-fb" class="preview-panel">
           <div class="mock-post max-w-md mx-auto mt-4 shadow-xl">
             <div class="flex items-center gap-2.5 p-3 border-b border-gray-100">
@@ -411,14 +483,13 @@
               <div id="prev-fb-media" class="rounded-lg overflow-hidden mb-2"></div>
             </div>
             <div class="flex items-center gap-4 px-3 py-2 border-t border-gray-100 text-xs text-gray-400">
-              <span class="flex items-center gap-1 cursor-pointer hover:text-blue-600">👍 Like</span>
-              <span class="flex items-center gap-1 cursor-pointer hover:text-blue-600">💬 Comment</span>
-              <span class="flex items-center gap-1 cursor-pointer hover:text-blue-600">↗ Share</span>
+              <span class="cursor-pointer hover:text-blue-600">👍 Like</span>
+              <span class="cursor-pointer hover:text-blue-600">💬 Comment</span>
+              <span class="cursor-pointer hover:text-blue-600">↗ Share</span>
             </div>
           </div>
         </div>
 
-        <!-- Instagram -->
         <div id="preview-ig" class="preview-panel hidden">
           <div class="mock-post max-w-sm mx-auto mt-4 shadow-xl">
             <div class="flex items-center justify-between p-2.5">
@@ -426,11 +497,9 @@
                 <div class="w-8 h-8 rounded-full" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)"></div>
                 <span class="font-bold text-sm">yourbusiness</span>
               </div>
-              <span class="text-xl text-gray-400">···</span>
+              <span class="text-gray-400">···</span>
             </div>
-            <div id="prev-ig-media" class="aspect-square bg-gray-100 flex items-center justify-center text-gray-400 text-sm">
-              Photo / Reel Preview
-            </div>
+            <div id="prev-ig-media" class="aspect-square bg-gray-100 flex items-center justify-center text-gray-400 text-sm">Photo / Reel Preview</div>
             <div class="p-3">
               <div class="flex gap-3 text-xl mb-2">❤️ 💬 ✈️ <span class="ml-auto">🔖</span></div>
               <p id="prev-ig-text" class="text-sm text-gray-700 leading-relaxed">Caption will appear here…</p>
@@ -438,32 +507,26 @@
           </div>
         </div>
 
-        <!-- TikTok -->
         <div id="preview-tt" class="preview-panel hidden">
           <div class="mock-post dark max-w-sm mx-auto mt-4 shadow-xl">
             <div class="p-4">
               <div class="text-xs font-bold text-teal-400 mb-3">TikTok Script</div>
               <div id="prev-tt-text" class="text-sm text-gray-200 leading-relaxed whitespace-pre-line min-h-24">Your TikTok script will appear here…</div>
-              <p class="text-xs text-gray-600 mt-4 pt-3 border-t border-white/10">📹 Read this on camera for 15–30 sec. Auto-upload in Phase 4.</p>
+              <p class="text-xs text-gray-600 mt-4 pt-3 border-t border-white/10">📹 Read this on camera for 15–30 sec.</p>
             </div>
           </div>
         </div>
 
-        <!-- YouTube -->
         <div id="preview-yt" class="preview-panel hidden">
           <div class="mock-post dark max-w-md mx-auto mt-4 shadow-xl">
-            <div id="prev-yt-embed" class="aspect-video bg-gray-900 flex items-center justify-center text-gray-500 text-sm">
-              Add a YouTube or MP4 URL to preview
-            </div>
+            <div id="prev-yt-embed" class="aspect-video bg-gray-900 flex items-center justify-center text-gray-500 text-sm">Add a YouTube or MP4 URL to preview</div>
             <div class="p-4">
               <div id="prev-yt-title" class="font-bold text-white text-sm mb-2">Title will appear here…</div>
               <div id="prev-yt-desc" class="text-xs text-gray-400 leading-relaxed">Description will appear here…</div>
-              <p class="text-xs text-gray-700 mt-3 pt-3 border-t border-white/10">Also routes to: TikTok script · Instagram Reel · Facebook video</p>
             </div>
           </div>
         </div>
 
-        <!-- Google Business -->
         <div id="preview-gb" class="preview-panel hidden">
           <div class="mock-post max-w-sm mx-auto mt-4 shadow-xl">
             <div class="bg-white p-4 rounded-xl">
@@ -478,7 +541,6 @@
           </div>
         </div>
 
-        <!-- Website Hub -->
         <div id="preview-web" class="preview-panel hidden">
           <div class="max-w-lg mx-auto mt-4 space-y-4">
             <div class="card p-4">
@@ -512,48 +574,33 @@
     </div>
 
     <!-- ===== RIGHT: ACTIVITY + STATS ===== -->
-    <div class="w-64 flex-shrink-0 overflow-y-auto px-4 py-4 flex flex-col gap-5"
+    <div class="w-60 flex-shrink-0 overflow-y-auto px-4 py-4 flex flex-col gap-5"
          style="border-left:1px solid rgba(255,255,255,.05)">
 
-      <!-- Stats this week -->
       <div>
         <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">This Week</div>
         <div class="grid grid-cols-2 gap-2">
-          <div class="stat-card">
-            <div class="text-2xl font-black text-white" id="stat-posts">—</div>
-            <div class="text-xs text-gray-600 mt-0.5">Posts</div>
-          </div>
-          <div class="stat-card">
-            <div class="text-2xl font-black text-white" id="stat-reach">—</div>
-            <div class="text-xs text-gray-600 mt-0.5">Reach</div>
-          </div>
-          <div class="stat-card">
-            <div class="text-2xl font-black text-white" id="stat-likes">—</div>
-            <div class="text-xs text-gray-600 mt-0.5">Likes</div>
-          </div>
-          <div class="stat-card">
-            <div class="text-2xl font-black text-white" id="stat-platforms">0/6</div>
-            <div class="text-xs text-gray-600 mt-0.5">Connected</div>
-          </div>
+          <div class="stat-card"><div class="text-2xl font-black text-white" id="stat-posts">—</div><div class="text-xs text-gray-600 mt-0.5">Posts</div></div>
+          <div class="stat-card"><div class="text-2xl font-black text-white" id="stat-reach">—</div><div class="text-xs text-gray-600 mt-0.5">Reach</div></div>
+          <div class="stat-card"><div class="text-2xl font-black text-white" id="stat-likes">—</div><div class="text-xs text-gray-600 mt-0.5">Likes</div></div>
+          <div class="stat-card"><div class="text-2xl font-black text-white" id="stat-platforms">0/6</div><div class="text-xs text-gray-600 mt-0.5">Connected</div></div>
         </div>
       </div>
 
-      <!-- Upcoming posts -->
       <div>
         <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Upcoming</div>
         <div class="space-y-2" id="upcomingPosts">
           {% for day, label, platforms in [
-            ('Today',  'Auto-post',      ['FB','IG']),
-            ('Thu',    'Promo special',  ['FB','IG','TT']),
-            ('Fri',    'Weekend hours',  ['GB','WEB']),
+            ('Today', 'Auto-post',     ['FB','IG']),
+            ('Thu',   'Promo special', ['FB','IG','TT']),
+            ('Fri',   'Weekend hours', ['GB','WEB']),
           ] %}
           <div class="card p-2.5">
             <div class="flex items-center justify-between mb-1">
               <span class="text-xs font-bold text-gray-300">{{ day }}</span>
               <div class="flex gap-1">
                 {% for p in platforms %}
-                <span class="text-xs px-1.5 py-0.5 rounded font-bold text-white"
-                      style="background:rgba(255,255,255,.08)">{{ p }}</span>
+                <span class="text-xs px-1.5 py-0.5 rounded font-bold text-white" style="background:rgba(255,255,255,.08)">{{ p }}</span>
                 {% endfor %}
               </div>
             </div>
@@ -563,17 +610,10 @@
         </div>
       </div>
 
-      <!-- Routing rules -->
       <div>
         <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Smart Routing</div>
-        <div class="space-y-1.5 text-xs text-gray-500">
-          {% for rule in [
-            ('Text',   'FB · Google · Web'),
-            ('Photo',  'FB · IG · Google · Web'),
-            ('Video',  'YT · TikTok · FB · IG'),
-            ('Promo',  'All platforms'),
-            ('Update', 'FB · Google · Web'),
-          ] %}
+        <div class="space-y-1.5 text-xs">
+          {% for rule in [('Text','FB · Google · Web'),('Photo','FB · IG · Google · Web'),('Video','YT · TikTok · FB · IG'),('Promo','All platforms'),('Update','FB · Google · Web')] %}
           <div class="flex items-center justify-between">
             <span class="font-semibold text-gray-400">{{ rule[0] }}</span>
             <span class="text-gray-600">{{ rule[1] }}</span>
@@ -582,7 +622,6 @@
         </div>
       </div>
 
-      <!-- Activity feed -->
       <div class="flex-1">
         <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Activity</div>
         <div id="activityFeed" class="space-y-1">
@@ -590,10 +629,9 @@
         </div>
       </div>
 
-      <!-- Quick actions -->
-      <div class="space-y-1.5 pb-4">
+      <div class="space-y-1 pb-4">
         <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Quick Actions</div>
-        <button class="btn-ghost w-full text-left text-xs" onclick="window.location='/calendar'">📅 View Calendar</button>
+        <button class="btn-ghost w-full text-left text-xs" onclick="window.location='/calendar'">📅 Calendar</button>
         <button class="btn-ghost w-full text-left text-xs" onclick="window.location='/analytics'">📊 Analytics</button>
         <button class="btn-ghost w-full text-left text-xs" onclick="window.location='/websites'">🌐 Website Hub</button>
       </div>
@@ -605,21 +643,19 @@
 <div id="toastContainer"></div>
 
 <script>
-// ===== Sidebar toggle =====
 const sidebar = document.getElementById('sidebar');
 let sidebarOpen = true;
 function toggleSidebar() {
   sidebarOpen = !sidebarOpen;
-  sidebar.style.width = sidebarOpen ? '220px' : '0px';
+  sidebar.style.width = sidebarOpen ? '224px' : '0px';
 }
 
-// ===== Content type routing =====
 const ROUTING = {
-  text:   { hint:'Text → routes to Facebook, Google Business, Website',  platforms:['fb','gb','web'] },
-  image:  { hint:'Photo → routes to Facebook, Instagram, Google, Website', platforms:['fb','ig','gb','web'] },
-  video:  { hint:'Video → routes to YouTube, TikTok, Facebook, Instagram', platforms:['yt','tt','fb','ig'] },
-  promo:  { hint:'Promo → all platforms',                                   platforms:['fb','ig','yt','tt','gb','web'] },
-  update: { hint:'Update → Facebook, Google Business, Website',            platforms:['fb','gb','web'] },
+  text:   { hint:'Text → routes to Facebook, Google Business, Website',   platforms:['fb','gb','web'] },
+  image:  { hint:'Photo → routes to Facebook, Instagram, Google, Website',  platforms:['fb','ig','gb','web'] },
+  video:  { hint:'Video → routes to YouTube, TikTok, Facebook, Instagram',  platforms:['yt','tt','fb','ig'] },
+  promo:  { hint:'Promo → all platforms',                                    platforms:['fb','ig','yt','tt','gb','web'] },
+  update: { hint:'Update → Facebook, Google Business, Website',             platforms:['fb','gb','web'] },
 };
 const CHAR_LIMITS = { fb:63206, ig:2200, tt:150, yt:5000, gb:1500, web:9999 };
 let currentType = 'text';
@@ -628,34 +664,21 @@ function setContentType(type, btn) {
   currentType = type;
   document.querySelectorAll('.ctype-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-
   const r = ROUTING[type];
   document.getElementById('routingHint').textContent = r.hint;
-
-  // Auto-check routing
   ['fb','ig','yt','tt','gb','web'].forEach(pid => {
     const el = document.getElementById('tog-' + pid);
     if (el) el.checked = (pid === 'web') || r.platforms.includes(pid);
   });
-
-  // Show/hide media group
   const mg = document.getElementById('mediaGroup');
   const vg = document.getElementById('videoGroup');
   const ml = document.getElementById('mediaLabel');
-  if (type === 'video') {
-    mg.classList.remove('hidden'); vg.classList.remove('hidden');
-    ml.textContent = 'Thumbnail URL';
-  } else if (type === 'image' || type === 'promo') {
-    mg.classList.remove('hidden'); vg.classList.add('hidden');
-    ml.textContent = 'Image URL';
-  } else {
-    mg.classList.add('hidden');
-  }
-
+  if (type === 'video') { mg.classList.remove('hidden'); vg.classList.remove('hidden'); ml.textContent = 'Thumbnail URL'; }
+  else if (type === 'image' || type === 'promo') { mg.classList.remove('hidden'); vg.classList.add('hidden'); ml.textContent = 'Image URL'; }
+  else { mg.classList.add('hidden'); }
   updatePreviews();
 }
 
-// ===== Preview tabs =====
 function switchPreview(pid, btn) {
   document.querySelectorAll('.preview-panel').forEach(p => p.classList.add('hidden'));
   document.querySelectorAll('.prev-tab').forEach(b => b.classList.remove('active'));
@@ -663,154 +686,84 @@ function switchPreview(pid, btn) {
   btn.classList.add('active');
 }
 
-// ===== Live previews =====
 function updatePreviews() {
   const caption  = document.getElementById('mainCaption').value;
   const mediaUrl = (document.getElementById('mediaUrl')?.value || '').trim();
-  const linkUrl  = (document.getElementById('linkUrl')?.value || '').trim();
-
-  // Char count
+  const linkUrl  = (document.getElementById('linkUrl')?.value  || '').trim();
   const activeTab = document.querySelector('.prev-tab.active')?.id?.replace('ptab-','') || 'fb';
   const limit = CHAR_LIMITS[activeTab] || 9999;
   document.getElementById('charCount').textContent = caption.length + ' chars';
   document.getElementById('charLimit').textContent = '/ ' + limit.toLocaleString();
   document.getElementById('charCount').style.color = caption.length > limit ? '#f87171' : '#475569';
-
-  // FB
-  const fbText = document.getElementById('prev-fb-text');
-  if (fbText) fbText.textContent = caption || 'Your post will preview here…';
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('prev-fb-text', caption || 'Your post will preview here…');
+  set('prev-ig-text', caption || 'Caption will appear here…');
+  set('prev-tt-text', caption || 'Your TikTok script will appear here…');
+  set('prev-yt-title', caption?.split('\n')[0] || 'Title will appear here…');
+  set('prev-yt-desc',  caption || 'Description will appear here…');
+  set('prev-gb-text', caption || 'Your Google Business update…');
+  set('prev-web-text', caption || 'Your latest update will appear here…');
   const fbMedia = document.getElementById('prev-fb-media');
   if (fbMedia) fbMedia.innerHTML = mediaUrl ? `<img src="${mediaUrl}" class="w-full rounded-lg" onerror="this.style.display='none'">` : '';
-
-  // IG
-  const igText = document.getElementById('prev-ig-text');
-  if (igText) igText.textContent = caption || 'Caption will appear here…';
   const igMedia = document.getElementById('prev-ig-media');
-  if (igMedia) {
-    if (mediaUrl) {
-      igMedia.innerHTML = `<img src="${mediaUrl}" class="w-full object-cover aspect-square" onerror="this.parentElement.innerHTML='<div class=text-center text-xs text-gray-400 py-8>Photo / Reel Preview</div>'"/>`;
-    } else {
-      igMedia.innerHTML = '<div class="flex items-center justify-center h-full text-gray-400 text-sm py-10">Photo / Reel Preview</div>';
-    }
-  }
-
-  // TT
-  const ttText = document.getElementById('prev-tt-text');
-  if (ttText) ttText.textContent = caption || 'Your TikTok script will appear here…';
-
-  // YT
-  const ytTitle = document.getElementById('prev-yt-title');
-  const ytDesc  = document.getElementById('prev-yt-desc');
-  if (ytTitle) ytTitle.textContent = caption?.split('\n')[0] || 'Title will appear here…';
-  if (ytDesc)  ytDesc.textContent  = caption || 'Description will appear here…';
-
-  // GB
-  const gbText = document.getElementById('prev-gb-text');
+  if (igMedia) igMedia.innerHTML = mediaUrl
+    ? `<img src="${mediaUrl}" class="w-full object-cover aspect-square" onerror="this.parentElement.innerHTML='<div class=\"text-center text-xs text-gray-400 py-8\">Photo / Reel Preview</div>'"/>`
+    : '<div class="flex items-center justify-center h-full text-gray-400 text-sm py-10">Photo / Reel Preview</div>';
   const gbLink = document.getElementById('prev-gb-link');
-  if (gbText) gbText.textContent = caption || 'Your Google Business update…';
   if (gbLink && linkUrl) gbLink.href = linkUrl;
-
-  // Web
-  const webText = document.getElementById('prev-web-text');
-  if (webText) webText.textContent = caption || 'Your latest update will appear here…';
 }
 
-// ===== Push to all =====
 async function pushToAll() {
   const caption = document.getElementById('mainCaption').value.trim();
   if (!caption) { showToast('Write a caption first.', 'err'); return; }
-
-  const selectedPlatforms = ['fb','ig','yt','tt','gb','web'].filter(pid => {
-    const el = document.getElementById('tog-' + pid);
-    return el && el.checked;
-  });
-
-  if (!selectedPlatforms.length) { showToast('Select at least one platform.', 'err'); return; }
-
-  const payload = {
-    caption,
-    content_type: currentType,
-    platforms: selectedPlatforms,
-    media_url: document.getElementById('mediaUrl')?.value || '',
-    link_url:  document.getElementById('linkUrl')?.value || '',
-    schedule:  document.getElementById('scheduleTime')?.value || '',
-  };
-
-  addFeedItem('Pushing to ' + selectedPlatforms.join(', ').toUpperCase() + '…', 'info');
-
+  const platforms = ['fb','ig','yt','tt','gb','web'].filter(pid => { const el = document.getElementById('tog-'+pid); return el && el.checked; });
+  if (!platforms.length) { showToast('Select at least one platform.', 'err'); return; }
+  const payload = { caption, content_type:currentType, platforms, media_url:document.getElementById('mediaUrl')?.value||'', link_url:document.getElementById('linkUrl')?.value||'', schedule:document.getElementById('scheduleTime')?.value||'' };
+  addFeedItem('Pushing to ' + platforms.join(', ').toUpperCase() + '…', 'info');
   try {
-    const res = await fetch('/push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const res  = await fetch('/push', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
     const data = await res.json();
-    if (res.ok) {
-      showToast('✅ Pushed to ' + selectedPlatforms.length + ' platform(s)!', 'ok');
-      addFeedItem('✅ Posted to ' + selectedPlatforms.join(', ').toUpperCase(), 'ok');
-      document.getElementById('mainCaption').value = '';
-      updatePreviews();
-    } else {
-      showToast(data.error || 'Push failed.', 'err');
-      addFeedItem('❌ Error: ' + (data.error || 'Unknown'), 'warn');
-    }
-  } catch (e) {
-    showToast('Network error.', 'err');
-    addFeedItem('❌ Network error', 'warn');
-  }
+    if (res.ok) { showToast('✅ Pushed to ' + platforms.length + ' platform(s)!', 'ok'); addFeedItem('✅ Posted to ' + platforms.join(', ').toUpperCase(), 'ok'); document.getElementById('mainCaption').value=''; updatePreviews(); }
+    else { showToast(data.error||'Push failed.','err'); addFeedItem('❌ '+(data.error||'Unknown'),'warn'); }
+  } catch(e) { showToast('Network error.','err'); addFeedItem('❌ Network error','warn'); }
 }
 
-// ===== Auto generate =====
 async function autoGenerate() {
-  addFeedItem('Generating caption…', 'info');
+  addFeedItem('Generating caption…','info');
   try {
-    const res = await fetch('/generate', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ content_type: currentType, platform: 'general' }) });
+    const res  = await fetch('/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({content_type:currentType,platform:'general'}) });
     const data = await res.json();
-    if (res.ok && data.caption) {
-      document.getElementById('mainCaption').value = data.caption;
-      updatePreviews();
-      showToast('✨ Caption generated!', 'ok');
-      addFeedItem('✨ AI caption ready', 'ok');
-    } else {
-      showToast(data.error || 'Generation failed.', 'err');
-    }
-  } catch(e) {
-    showToast('Network error.', 'err');
-  }
+    if (res.ok && data.caption) { document.getElementById('mainCaption').value=data.caption; updatePreviews(); showToast('✨ Caption generated!','ok'); addFeedItem('✨ AI caption ready','ok'); }
+    else showToast(data.error||'Generation failed.','err');
+  } catch(e) { showToast('Network error.','err'); }
 }
 
-// ===== Save draft =====
 function saveDraft() {
-  const caption = document.getElementById('mainCaption').value.trim();
-  if (!caption) { showToast('Nothing to save.', 'err'); return; }
-  showToast('Draft saved.', 'info');
-  addFeedItem('📝 Draft saved', 'info');
+  if (!document.getElementById('mainCaption').value.trim()) { showToast('Nothing to save.','err'); return; }
+  showToast('Draft saved.','info'); addFeedItem('📝 Draft saved','info');
 }
 
-// ===== Copy embed =====
 function copyEmbed() {
-  const code = document.getElementById('embedCode').textContent;
-  navigator.clipboard.writeText(code).then(() => showToast('Embed code copied!', 'ok'));
+  navigator.clipboard.writeText(document.getElementById('embedCode').textContent).then(() => showToast('Embed code copied!','ok'));
 }
 
-// ===== Toast =====
 function showToast(msg, type='info') {
   const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
+  t.className = `toast toast-${type}`; t.textContent = msg;
   document.getElementById('toastContainer').appendChild(t);
   setTimeout(() => t.remove(), 3500);
 }
 
-// ===== Feed =====
 function addFeedItem(msg, type='info') {
   const feed = document.getElementById('activityFeed');
   const d = document.createElement('div');
   d.className = `feed-item feed-${type}`;
-  const now = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-  d.innerHTML = `<span>${msg}</span> <span class="float-right text-gray-700">${now}</span>`;
+  const now = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  d.innerHTML = `<span>${msg}</span><span class="float-right text-gray-700">${now}</span>`;
   feed.insertBefore(d, feed.firstChild);
   if (feed.children.length > 20) feed.removeChild(feed.lastChild);
 }
 
-// ===== Load stats =====
 async function loadStats() {
   try {
     const res = await fetch('/api/stats');
@@ -819,19 +772,18 @@ async function loadStats() {
     if (d.posts)     document.getElementById('stat-posts').textContent     = d.posts;
     if (d.reach)     document.getElementById('stat-reach').textContent     = d.reach;
     if (d.likes)     document.getElementById('stat-likes').textContent     = d.likes;
-    if (d.platforms) document.getElementById('stat-platforms').textContent = d.platforms + '/6';
-
-    // Platform status dots
+    if (d.platforms) document.getElementById('stat-platforms').textContent = d.platforms+'/6';
     if (d.connected_platforms) {
       d.connected_platforms.forEach(pid => {
-        const el = document.getElementById('status-' + pid);
-        if (el) { el.style.background = '#22c55e'; el.title = 'Connected'; }
+        const dot = document.getElementById('status-'+pid);
+        const lbl = document.getElementById('statuslabel-'+pid);
+        if (dot) { dot.style.opacity='1'; dot.classList.add('connected'); }
+        if (lbl) { lbl.textContent='ON'; lbl.style.color='#22c55e'; }
       });
     }
-  } catch(e) { /* silently fail */ }
+  } catch(e) {}
 }
 
-// Init
 document.addEventListener('DOMContentLoaded', () => {
   loadStats();
   setInterval(loadStats, 30000);
