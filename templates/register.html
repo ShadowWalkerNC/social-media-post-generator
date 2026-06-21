@@ -6,7 +6,6 @@
   <title>Create Account — PostPilot Pro</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #0f1117;
@@ -16,7 +15,6 @@
       justify-content: center;
       padding: 1.5rem;
     }
-
     .card {
       background: #1a1d27;
       border: 1px solid #2a2d3e;
@@ -26,15 +24,10 @@
       max-width: 420px;
       box-shadow: 0 20px 60px rgba(0,0,0,.5);
     }
-
-    .logo {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
+    .logo { text-align: center; margin-bottom: 2rem; }
     .logo-icon { font-size: 2.4rem; display: block; margin-bottom: .4rem; }
     .logo h1   { font-size: 1.4rem; font-weight: 700; color: #fff; letter-spacing: -.3px; }
     .logo p    { color: #6b7280; font-size: .85rem; margin-top: .25rem; }
-
     .free-badge {
       display: flex;
       align-items: center;
@@ -48,7 +41,6 @@
       font-size: .85rem;
     }
     .free-badge span { font-size: 1.1rem; }
-
     .flash {
       background: #2d1f1f;
       border: 1px solid #7f1d1d;
@@ -58,7 +50,6 @@
       margin-bottom: 1.25rem;
       font-size: .875rem;
     }
-
     label {
       display: block;
       color: #9ca3af;
@@ -68,7 +59,6 @@
       letter-spacing: .5px;
       margin-bottom: .4rem;
     }
-
     input[type=text], input[type=email], input[type=password] {
       width: 100%;
       padding: .75rem 1rem;
@@ -82,14 +72,7 @@
       margin-bottom: 1.25rem;
     }
     input:focus { border-color: #6366f1; }
-
-    .hint {
-      color: #4b5563;
-      font-size: .78rem;
-      margin-top: -.9rem;
-      margin-bottom: 1.25rem;
-    }
-
+    .hint { color: #4b5563; font-size: .78rem; margin-top: -.9rem; margin-bottom: 1.25rem; }
     .btn {
       display: block;
       width: 100%;
@@ -105,16 +88,8 @@
       margin-top: .25rem;
     }
     .btn:hover { opacity: .88; }
-
-    .terms {
-      color: #4b5563;
-      font-size: .78rem;
-      text-align: center;
-      margin-top: 1rem;
-      line-height: 1.5;
-    }
+    .terms { color: #4b5563; font-size: .78rem; text-align: center; margin-top: 1rem; line-height: 1.5; }
     .terms a { color: #6366f1; text-decoration: none; }
-
     .divider {
       text-align: center;
       color: #374151;
@@ -132,22 +107,12 @@
     }
     .divider::before { left: 0; }
     .divider::after  { right: 0; }
-
-    .footer-link {
-      text-align: center;
-      color: #6b7280;
-      font-size: .875rem;
-    }
-    .footer-link a {
-      color: #818cf8;
-      text-decoration: none;
-      font-weight: 600;
-    }
+    .footer-link { text-align: center; color: #6b7280; font-size: .875rem; }
+    .footer-link a { color: #818cf8; text-decoration: none; font-weight: 600; }
     .footer-link a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-
 <div class="card">
   <div class="logo">
     <span class="logo-icon">🚀</span>
@@ -167,6 +132,8 @@
   {% endwith %}
 
   <form method="POST" action="/register">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
     <label for="display_name">Business / Your Name</label>
     <input type="text" id="display_name" name="display_name"
            placeholder="Smoky Wheels BBQ"
@@ -189,15 +156,11 @@
 
   <p class="terms">
     By signing up you agree to our
-    <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.
+    <a href="/legal/terms">Terms of Service</a> and <a href="/legal/privacy">Privacy Policy</a>.
   </p>
 
   <div class="divider">already have an account?</div>
-
-  <p class="footer-link">
-    <a href="/login">Sign in →</a>
-  </p>
+  <p class="footer-link"><a href="/login">Sign in →</a></p>
 </div>
-
 </body>
 </html>

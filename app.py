@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """
 Post-Pilot — Smart Social Media Hub
-Session 15: route audit + new UI wiring
-  - /connect page route
-  - /auth/disconnect/<pid>
-  - /api/get_business (GET)
-  - /api/generate_posts (POST alias)
-  - /api/generate_single (POST alias)
-  - /api/scheduled_posts (GET)
-  - /api/bulk_schedule (POST)
-  - /api/delete_post (POST)
-  - /api/publish_post (POST alias)
-  - /api/connection_status now accepts GET + POST
-  - /api/setup_business now also persists to DB via UserManager
+Session 16: security hardening
+  - OAuth tokens persisted to DB via auth_manager (no more in-memory loss)
+  - Tokens loaded from DB on every request via _get_tokens()
+  - FLASK_SECRET_KEY required — raises at startup if missing in production
+  - Flask-Limiter on /login (5/min) and /register (10/min) per IP
+  - Flask-WTF CSRFProtect on all POST forms
+  - Custom 404, 500, 429 error handlers
+  - /auth/disconnect now calls auth_manager.delete_token
 """
 
 import os
@@ -26,6 +22,9 @@ from flask_login import (
     LoginManager, login_user, logout_user,
     login_required, current_user
 )
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 
 from modules.post_generator   import SocialMediaPostGenerator
@@ -36,14 +35,38 @@ from modules.user_manager      import UserManager, User
 from modules.billing_manager   import BillingManager
 from modules.website_manager   import WebsiteManager
 from modules.api_manager       import v1 as v1_blueprint, CREATE_API_KEYS_TABLE
+from modules.auth_manager      import (
+    save_token, load_token, delete_token,
+    get_valid_google_token, init_db as auth_init_db
+)
 
 load_dotenv()
 
+# ── Secret key — hard-fail if missing in production ───────────────────────
+_secret = os.getenv('FLASK_SECRET_KEY')
+if not _secret:
+    import sys
+    if os.getenv('FLASK_ENV') == 'production' or os.getenv('RAILWAY_ENVIRONMENT'):
+        sys.exit('FATAL: FLASK_SECRET_KEY is not set. Refusing to start in production.')
+    _secret = 'dev-only-insecure-key'  # local dev fallback only
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'dev-secret-change-me')
+app.config['SECRET_KEY'] = _secret
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour token validity
+
+# ── Extensions ────────────────────────────────────────────────────────────
+csrf = CSRFProtect(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri=os.getenv('REDIS_URL', 'memory://'),
+)
 
 # ── Register blueprints ───────────────────────────────────────────────────
-app.register_blueprint(v1_blueprint)          # mounts at /v1/*
+app.register_blueprint(v1_blueprint)  # mounts at /v1/*
+csrf.exempt(v1_blueprint)             # V1 API uses its own key-based auth
 
 # ── Flask-Login ──────────────────────────────────────────────────────────
 login_manager = LoginManager(app)
@@ -53,9 +76,6 @@ login_manager.login_message = 'Please sign in to access Post-Pilot.'
 @login_manager.user_loader
 def load_user(user_id: str):
     return UserManager.get_user(user_id)
-
-
-user_sessions = {}   # in-memory token cache, keyed by user UUID
 
 
 # ── DB init ──────────────────────────────────────────────────────────────
@@ -120,10 +140,76 @@ def init_db():
         db.close()
         print('DB initialised')
 
+    # Also init auth_manager's platform_tokens table
+    auth_init_db()
+
+
+# ── Token helpers (DB-backed, replaces in-memory user_sessions) ───────────
+
+def _uid() -> str:
+    return current_user.id if current_user.is_authenticated else 'default'
+
+def _get_tokens(uid: str = None) -> dict:
+    """
+    Build a tokens dict from the DB for use by UniversalPublisher.
+    Falls back gracefully — missing platforms just return empty strings.
+    """
+    uid = uid or _uid()
+    tokens = {}
+    platform_map = {
+        'facebook': ['facebook_token', 'facebook_page_id'],
+        'google':   ['google_token',   'google_location_id'],
+        'tiktok':   ['tiktok_token'],
+        'youtube':  ['youtube_token'],
+    }
+    for platform, keys in platform_map.items():
+        rec = load_token(platform, uid)
+        if rec:
+            tokens[keys[0]] = rec['access_token']
+            if len(keys) > 1 and rec.get('meta'):
+                if platform == 'facebook':
+                    tokens['facebook_page_id']  = rec['meta'].get('page_id', '')
+                    tokens['instagram_token']   = rec['access_token']
+                    tokens['instagram_id']      = rec['meta'].get('ig_id', '')
+                elif platform == 'google':
+                    tokens['google_location_id'] = rec['meta'].get('location_id', '')
+                    tokens['youtube_token']      = rec['access_token']
+    return tokens
+
+def _business_name() -> str:
+    if not current_user.is_authenticated:
+        return 'Your Business'
+    profile = current_user.__dict__.get('business_profile') or {}
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except Exception:
+            profile = {}
+    return profile.get('name') or current_user.__dict__.get('display_name') or 'Your Business'
+
+
+# ── Error handlers ────────────────────────────────────────────────────────
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return render_template('500.html'), 500
+
+@app.errorhandler(429)
+def rate_limited(e):
+    if request.is_json:
+        return jsonify({'success': False, 'error': 'Too many requests. Please wait and try again.'}), 429
+    flash('Too many attempts. Please wait a minute and try again.')
+    return redirect(url_for('login')), 429
+
 
 # ── AUTH ROUTES ───────────────────────────────────────────────────────────
 
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit('10 per minute')
 def register():
     plan = request.args.get('plan', '')
     if current_user.is_authenticated:
@@ -151,6 +237,7 @@ def register():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit('5 per minute')
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('home'))
@@ -234,6 +321,7 @@ def billing_cancel():
 
 
 @app.route('/webhooks/stripe', methods=['POST'])
+@csrf.exempt
 def stripe_webhook():
     payload    = request.data
     sig_header = request.headers.get('Stripe-Signature', '')
@@ -302,7 +390,7 @@ def site_public(user_id: str):
     wm   = WebsiteManager(user_id=user_id)
     site = wm.get_site()
     if not site.get('published'):
-        return render_template('index.html', site={}), 404
+        return render_template('404.html'), 404
     return _render_public_site(site, preview=False)
 
 
@@ -375,31 +463,14 @@ def connect_page():
     return render_template('connect.html')
 
 
-# ── HELPERS ───────────────────────────────────────────────────────────────
-
-def _uid() -> str:
-    return current_user.id if current_user.is_authenticated else 'default'
-
-def _business_name() -> str:
-    if not current_user.is_authenticated:
-        return 'Your Business'
-    profile = current_user.__dict__.get('business_profile') or {}
-    if isinstance(profile, str):
-        try:
-            profile = json.loads(profile)
-        except Exception:
-            profile = {}
-    return profile.get('name') or current_user.__dict__.get('display_name') or 'Your Business'
-
-
-# ── CORE: UNIVERSAL PUSH ─────────────────────────────────────────────────
+# ── CORE: UNIVERSAL PUSH ──────────────────────────────────────────────────
 
 @app.route('/api/push_all', methods=['POST'])
 @login_required
 def api_push_all():
     data      = request.json or {}
     uid       = _uid()
-    tokens    = user_sessions.get(uid, {}).get('tokens', {})
+    tokens    = _get_tokens(uid)
     publisher = UniversalPublisher(tokens, user_id=uid)
     results   = publisher.push_all(
         caption       = data.get('caption', ''),
@@ -431,7 +502,7 @@ def api_push_all():
 def api_publish():
     data      = request.json or {}
     uid       = _uid()
-    tokens    = user_sessions.get(uid, {}).get('tokens', {})
+    tokens    = _get_tokens(uid)
     publisher = UniversalPublisher(tokens, user_id=uid)
     results   = publisher.push_all(
         caption      = data.get('caption', ''),
@@ -468,11 +539,6 @@ def api_onboarding_setup():
         'prompt_time':   data.get('prompt_time', '07:00'),
     }
     UserManager.save_business_profile(uid, business_info)
-    user_sessions.setdefault(uid, {})
-    user_sessions[uid]['business'] = business_info
-    gen = user_sessions[uid].get('generator', SocialMediaPostGenerator())
-    gen.setup_business(business_info)
-    user_sessions[uid]['generator'] = gen
     return jsonify({'success': True, 'business': business_info})
 
 
@@ -482,7 +548,7 @@ def api_onboarding_setup():
 @login_required
 def api_connection_status():
     uid    = _uid()
-    tokens = user_sessions.get(uid, {}).get('tokens', {})
+    tokens = _get_tokens(uid)
     status = {
         'fb':  bool(tokens.get('facebook_token') and tokens.get('facebook_page_id')),
         'ig':  bool(tokens.get('instagram_token') and tokens.get('instagram_id')),
@@ -500,19 +566,20 @@ def api_connection_status():
 @login_required
 def auth_disconnect(pid):
     uid = _uid()
-    if uid not in user_sessions:
-        return jsonify({'success': False, 'message': 'No session found'})
-    tokens = user_sessions[uid].setdefault('tokens', {})
-    mapping = {
-        'fb':  ['facebook_token', 'facebook_page_id', 'instagram_token', 'instagram_id'],
-        'ig':  ['instagram_token', 'instagram_id'],
-        'tt':  ['tiktok_token'],
-        'yt':  ['youtube_token'],
-        'gb':  ['google_token', 'google_location_id'],
-        'web': ['website_token', 'website_webhook_url'],
+    platform_map = {
+        'fb':  'facebook',
+        'ig':  'instagram',
+        'tt':  'tiktok',
+        'yt':  'youtube',
+        'gb':  'google',
     }
-    for k in mapping.get(pid, []):
-        tokens.pop(k, None)
+    platform = platform_map.get(pid)
+    if platform:
+        delete_token(platform, uid)
+        if platform == 'facebook':
+            delete_token('instagram', uid)
+        if platform == 'google':
+            delete_token('youtube', uid)
     return jsonify({'success': True})
 
 
@@ -524,11 +591,8 @@ def api_setup_business():
     data = request.json or {}
     uid  = _uid()
     info = data.get('business_info', {})
-    user_sessions.setdefault(uid, {})
     gen  = SocialMediaPostGenerator()
     gen.setup_business(info)
-    user_sessions[uid]['generator'] = gen
-    # Persist to DB so /api/get_business can retrieve it later
     UserManager.save_business_profile(uid, info)
     return jsonify({'success': True})
 
@@ -542,23 +606,26 @@ def api_get_business():
             profile = json.loads(profile)
         except Exception:
             profile = {}
-    # Fallback to in-memory session
-    if not profile:
-        uid = _uid()
-        profile = user_sessions.get(uid, {}).get('business', {})
     return jsonify({'success': True, 'business_info': profile or {}})
 
 
 @app.route('/api/setup_tokens', methods=['POST'])
 @login_required
 def api_setup_tokens():
-    data = request.json or {}
-    uid  = _uid()
-    user_sessions.setdefault(uid, {})
-    user_sessions[uid]['tokens'] = data.get('tokens', {})
-    gen = user_sessions[uid].get('generator', SocialMediaPostGenerator())
-    gen.setup_api_tokens(data.get('tokens', {}))
-    user_sessions[uid]['generator'] = gen
+    data     = request.json or {}
+    uid      = _uid()
+    incoming = data.get('tokens', {})
+    if incoming.get('facebook_token'):
+        save_token('facebook', incoming['facebook_token'],
+                   meta={'page_id': incoming.get('facebook_page_id', ''),
+                         'ig_id':   incoming.get('instagram_id', '')},
+                   user_id=uid)
+    if incoming.get('google_token'):
+        save_token('google', incoming['google_token'],
+                   meta={'location_id': incoming.get('google_location_id', '')},
+                   user_id=uid)
+    if incoming.get('tiktok_token'):
+        save_token('tiktok', incoming['tiktok_token'], user_id=uid)
     return jsonify({'success': True})
 
 
@@ -566,10 +633,17 @@ def api_setup_tokens():
 @app.route('/api/generate_posts', methods=['POST'])
 @login_required
 def api_generate_weekly():
-    uid = _uid()
-    gen = user_sessions.get(uid, {}).get('generator', SocialMediaPostGenerator())
+    uid     = _uid()
+    profile = getattr(current_user, 'business_profile', None)
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except Exception:
+            profile = {}
+    gen = SocialMediaPostGenerator()
+    if profile:
+        gen.setup_business(profile)
     schedule = gen.generate_weekly_schedule()
-    # Normalise response — generate.html expects {posts: [...]}
     posts = schedule if isinstance(schedule, list) else schedule.get('posts', [])
     return jsonify({'success': True, 'posts': posts, 'schedule': schedule})
 
@@ -579,9 +653,8 @@ def api_generate_weekly():
 @login_required
 def api_generate_post():
     data     = request.json or {}
-    uid      = _uid()
     template = data.get('template', 'instagram_location')
-    gen      = user_sessions.get(uid, {}).get('generator', SocialMediaPostGenerator())
+    gen      = SocialMediaPostGenerator()
     try:
         post = gen.generate_post(template)
         return jsonify({'success': True, 'post': post})
@@ -598,27 +671,22 @@ def api_schedule_post():
 @app.route('/api/scheduled_posts', methods=['GET'])
 @login_required
 def api_scheduled_posts():
-    """Return posts for the calendar week view. Reads from post_history."""
-    uid      = _uid()
-    from_dt  = request.args.get('from', '')
-    to_dt    = request.args.get('to', '')
-    db       = get_db()
+    uid  = _uid()
+    db   = get_db()
     try:
         rows = db.execute(
             'SELECT * FROM post_history WHERE user_id = ? AND status = "scheduled" '
             'ORDER BY scheduled_at ASC',
             (uid,)
         ).fetchall()
-        posts = []
-        for row in rows:
-            posts.append({
-                'id':             row['id'],
-                'caption':        row['caption'],
-                'platforms':      json.loads(row['platforms'] or '[]'),
-                'status':         row['status'],
-                'scheduled_date': row['scheduled_at'],
-                'time':           '',
-            })
+        posts = [{
+            'id':             row['id'],
+            'caption':        row['caption'],
+            'platforms':      json.loads(row['platforms'] or '[]'),
+            'status':         row['status'],
+            'scheduled_date': row['scheduled_at'],
+            'time':           '',
+        } for row in rows]
     except Exception:
         posts = []
     return jsonify({'success': True, 'posts': posts})
@@ -664,7 +732,7 @@ def api_delete_post():
 def api_analytics():
     uid     = _uid()
     data    = request.json or {}
-    tokens  = user_sessions.get(uid, {}).get('tokens', {})
+    tokens  = _get_tokens(uid)
     token   = tokens.get('facebook_token') or data.get('access_token')
     page_id = tokens.get('facebook_page_id') or data.get('page_id')
     if not token or not page_id:
@@ -710,12 +778,9 @@ def auth_facebook_callback():
                                  'access_token': page_token}).json()\
                     .get('instagram_business_account', {}).get('id')
     uid = _uid()
-    user_sessions.setdefault(uid, {})
-    user_sessions[uid].setdefault('tokens', {}).update(
-        facebook_token=page_token, facebook_page_id=page_id,
-        instagram_token=page_token, instagram_id=ig_id)
-    from modules.auth_manager import save_token
-    save_token('facebook', page_token, meta={'page_id': page_id, 'ig_id': ig_id}, user_id=uid)
+    save_token('facebook', page_token,
+               meta={'page_id': page_id, 'ig_id': ig_id},
+               user_id=uid)
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '2')
     platform = session.pop('oauth_platform', 'facebook')
@@ -747,7 +812,6 @@ def auth_google():
 @login_required
 def auth_google_callback():
     import requests as req
-    from modules.auth_manager import save_token
     from datetime import datetime, timedelta
     code   = request.args.get('code')
     cid    = os.getenv('GOOGLE_CLIENT_ID')
@@ -765,12 +829,11 @@ def auth_google_callback():
                      headers={'Authorization': f'Bearer {gtoken}'}).json()
     loc_id = (locs.get('locations') or [{}])[0].get('name', '')
     uid = _uid()
-    user_sessions.setdefault(uid, {})
-    user_sessions[uid].setdefault('tokens', {}).update(
-        google_token=gtoken, google_location_id=loc_id, youtube_token=gtoken)
-    save_token('google', gtoken, refresh_token=rtoken,
+    save_token('google', gtoken,
+               refresh_token=rtoken,
                expires_at=datetime.utcnow() + timedelta(hours=1),
-               meta={'location_id': loc_id}, user_id=uid)
+               meta={'location_id': loc_id},
+               user_id=uid)
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '3')
     platform = session.pop('oauth_platform', 'google')
@@ -801,7 +864,6 @@ def auth_tiktok():
 @login_required
 def auth_tiktok_callback():
     import requests as req
-    from modules.auth_manager import save_token
     from datetime import datetime, timedelta
     code   = request.args.get('code')
     ckey   = os.getenv('TIKTOK_CLIENT_KEY')
@@ -814,10 +876,10 @@ def auth_tiktok_callback():
     tt_token  = tokens.get('access_token')
     tt_rtoken = tokens.get('refresh_token')
     uid = _uid()
-    user_sessions.setdefault(uid, {})
-    user_sessions[uid].setdefault('tokens', {}).update(tiktok_token=tt_token)
-    save_token('tiktok', tt_token, refresh_token=tt_rtoken,
-               expires_at=datetime.utcnow() + timedelta(hours=24), user_id=uid)
+    save_token('tiktok', tt_token,
+               refresh_token=tt_rtoken,
+               expires_at=datetime.utcnow() + timedelta(hours=24),
+               user_id=uid)
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '4')
     platform = session.pop('oauth_platform', 'tiktok')

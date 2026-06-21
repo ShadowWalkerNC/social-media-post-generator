@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Server Error — PostPilot Pro</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117;
+      color: #f0f0f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    .container { max-width: 480px; }
+    .code {
+      font-size: 7rem;
+      font-weight: 900;
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1;
+      margin-bottom: 1rem;
+    }
+    h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: .75rem; }
+    p  { color: #6b7280; font-size: .95rem; line-height: 1.6; margin-bottom: 2rem; }
+    .btn {
+      display: inline-block;
+      padding: .75rem 2rem;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      color: #fff;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: .95rem;
+      text-decoration: none;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .emoji { font-size: 2.5rem; display: block; margin-bottom: 1rem; }
+    .hint { margin-top: 1.5rem; font-size: .8rem; color: #374151; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <span class="emoji">⚙️</span>
+    <div class="code">500</div>
+    <h1>Something went wrong</h1>
+    <p>An unexpected error occurred on our end. We've been notified and are looking into it.<br>Your data is safe.</p>
+    <a href="/dashboard" class="btn">← Back to Dashboard</a>
+    <p class="hint">If this keeps happening, please contact support.</p>
+  </div>
+</body>
+</html>
