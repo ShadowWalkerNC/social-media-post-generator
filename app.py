@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
 Post-Pilot — Smart Social Media Hub
-Session 14: fully wired app.py
-  - v1 API blueprint (SRN-compliant)
-  - Website hub routes
-  - Public site renderer + preview
-  - DB init (api_keys, websites, post_history tables)
-  - Public landing page for logged-out visitors
+Session 15: route audit + new UI wiring
+  - /connect page route
+  - /auth/disconnect/<pid>
+  - /api/get_business (GET)
+  - /api/generate_posts (POST alias)
+  - /api/generate_single (POST alias)
+  - /api/scheduled_posts (GET)
+  - /api/bulk_schedule (POST)
+  - /api/delete_post (POST)
+  - /api/publish_post (POST alias)
+  - /api/connection_status now accepts GET + POST
+  - /api/setup_business now also persists to DB via UserManager
 """
 
 import os
@@ -75,13 +81,9 @@ def init_db():
         db = sqlite3.connect(DATABASE)
         db.row_factory = sqlite3.Row
 
-        # api_keys table (Session 12)
         db.execute(CREATE_API_KEYS_TABLE)
-
-        # websites table (Session 11)
         db.execute(WebsiteManager.create_table_sql())
 
-        # post_history table (used by /v1/get_history + UserManager.log_post)
         db.execute('''
         CREATE TABLE IF NOT EXISTS post_history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,8 +92,8 @@ def init_db():
             content_type TEXT    DEFAULT 'text',
             image_url    TEXT,
             video_url    TEXT,
-            platforms    TEXT,   -- JSON array
-            results      TEXT,   -- JSON object
+            platforms    TEXT,
+            results      TEXT,
             status       TEXT    DEFAULT 'published',
             post_url     TEXT,
             scheduled_at INTEGER,
@@ -99,7 +101,6 @@ def init_db():
         );
         ''')
 
-        # users table (if not already created by user_manager)
         db.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id                TEXT PRIMARY KEY,
@@ -117,14 +118,14 @@ def init_db():
 
         db.commit()
         db.close()
-        print('✅ DB initialised')
+        print('DB initialised')
 
 
 # ── AUTH ROUTES ───────────────────────────────────────────────────────────
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    plan = request.args.get('plan', '')          # from marketing page CTA
+    plan = request.args.get('plan', '')
     if current_user.is_authenticated:
         return redirect(url_for('home'))
     if request.method == 'POST':
@@ -143,7 +144,6 @@ def register():
             return render_template('register.html', plan=plan)
         login_user(user, remember=True)
         UserManager.touch_login(user.id)
-        # If a paid plan was selected on the marketing page, go straight to checkout
         if plan and plan != 'free':
             return redirect(url_for('billing_checkout', plan=plan))
         return redirect(url_for('onboarding'))
@@ -179,7 +179,6 @@ def logout():
 
 @app.route('/')
 def index():
-    """Public marketing page. Redirect to dashboard if already logged in."""
     if current_user.is_authenticated:
         return redirect(url_for('home'))
     return render_template('index.html', site={})
@@ -244,6 +243,7 @@ def stripe_webhook():
 
 # ── WEBSITE HUB ROUTES ────────────────────────────────────────────────────
 
+@app.route('/website_hub')
 @app.route('/website')
 @login_required
 def website_hub():
@@ -292,7 +292,6 @@ def website_verify_domain():
 @app.route('/site/preview')
 @login_required
 def site_preview():
-    """Live preview iframe — shows the logged-in user's draft site."""
     wm   = WebsiteManager(user_id=current_user.id)
     site = wm.get_site()
     return _render_public_site(site, preview=True)
@@ -300,7 +299,6 @@ def site_preview():
 
 @app.route('/site/<user_id>')
 def site_public(user_id: str):
-    """Public-facing site for a given user_id. Only renders if published."""
     wm   = WebsiteManager(user_id=user_id)
     site = wm.get_site()
     if not site.get('published'):
@@ -309,31 +307,19 @@ def site_public(user_id: str):
 
 
 def _render_public_site(site: dict, preview: bool = False):
-    """
-    Render the public website for a user.
-    Falls back to a minimal inline render if no dedicated template exists yet.
-    """
-    # Build active sections list
     sections     = site.get('sections') or WebsiteManager.DEFAULT_SECTIONS
     active_secs  = [s for s in sections if s.get('enabled')]
     seo          = site.get('seo') or {}
     socials      = site.get('socials') or {}
     theme        = site.get('theme', 'modern')
     color        = site.get('primary_color', '#6366f1')
-
     try:
         return render_template(
             'public_site.html',
-            site=site,
-            sections=active_secs,
-            seo=seo,
-            socials=socials,
-            theme=theme,
-            primary_color=color,
-            preview=preview,
+            site=site, sections=active_secs, seo=seo, socials=socials,
+            theme=theme, primary_color=color, preview=preview,
         )
     except Exception:
-        # Fallback: minimal HTML so preview iframe is never blank
         sec_html = ''.join(
             f'<section id="{s["id"]}" style="padding:2rem;border-bottom:1px solid #eee">'
             f'<h2>{s["label"]}</h2></section>'
@@ -346,7 +332,7 @@ def _render_public_site(site: dict, preview: bool = False):
             f'<style>body{{font-family:sans-serif;margin:0;padding:0}}'
             f'h1{{background:{color};color:#fff;padding:2rem;margin:0}}</style>'
             f'</head><body>'
-            f'{"<div style=\"background:#fbbf24;color:#000;text-align:center;padding:.5rem;font-size:.8rem\">PREVIEW MODE</div>" if preview else ""}'
+            f'{"<div style=\\"background:#fbbf24;color:#000;text-align:center;padding:.5rem;font-size:.8rem\\">PREVIEW MODE</div>" if preview else ""}'
             f'<h1>{title}</h1>{sec_html}</body></html>'
         ), 200
 
@@ -382,6 +368,11 @@ def analytics_page():
 @login_required
 def onboarding():
     return render_template('onboarding.html')
+
+@app.route('/connect')
+@login_required
+def connect_page():
+    return render_template('connect.html')
 
 
 # ── HELPERS ───────────────────────────────────────────────────────────────
@@ -435,6 +426,7 @@ def api_push_all():
 
 
 @app.route('/api/publish', methods=['POST'])
+@app.route('/api/publish_post', methods=['POST'])
 @login_required
 def api_publish():
     data      = request.json or {}
@@ -486,22 +478,42 @@ def api_onboarding_setup():
 
 # ── CONNECTION STATUS ─────────────────────────────────────────────────────
 
-@app.route('/api/connection_status', methods=['POST'])
+@app.route('/api/connection_status', methods=['GET', 'POST'])
 @login_required
 def api_connection_status():
     uid    = _uid()
     tokens = user_sessions.get(uid, {}).get('tokens', {})
-    return jsonify({
-        'success': True,
-        'platforms': {
-            'fb':  bool(tokens.get('facebook_token') and tokens.get('facebook_page_id')),
-            'ig':  bool(tokens.get('instagram_token') and tokens.get('instagram_id')),
-            'yt':  bool(tokens.get('youtube_token')),
-            'tt':  True,
-            'gb':  bool(tokens.get('google_token')),
-            'web': True,
-        }
-    })
+    status = {
+        'fb':  bool(tokens.get('facebook_token') and tokens.get('facebook_page_id')),
+        'ig':  bool(tokens.get('instagram_token') and tokens.get('instagram_id')),
+        'yt':  bool(tokens.get('youtube_token')),
+        'tt':  bool(tokens.get('tiktok_token')),
+        'gb':  bool(tokens.get('google_token')),
+        'web': True,
+    }
+    return jsonify({'success': True, 'platforms': status, 'connections': status})
+
+
+# ── DISCONNECT ────────────────────────────────────────────────────────────
+
+@app.route('/auth/disconnect/<pid>')
+@login_required
+def auth_disconnect(pid):
+    uid = _uid()
+    if uid not in user_sessions:
+        return jsonify({'success': False, 'message': 'No session found'})
+    tokens = user_sessions[uid].setdefault('tokens', {})
+    mapping = {
+        'fb':  ['facebook_token', 'facebook_page_id', 'instagram_token', 'instagram_id'],
+        'ig':  ['instagram_token', 'instagram_id'],
+        'tt':  ['tiktok_token'],
+        'yt':  ['youtube_token'],
+        'gb':  ['google_token', 'google_location_id'],
+        'web': ['website_token', 'website_webhook_url'],
+    }
+    for k in mapping.get(pid, []):
+        tokens.pop(k, None)
+    return jsonify({'success': True})
 
 
 # ── GENERATE / SCHEDULE / ANALYTICS ──────────────────────────────────────
@@ -511,11 +523,30 @@ def api_connection_status():
 def api_setup_business():
     data = request.json or {}
     uid  = _uid()
+    info = data.get('business_info', {})
     user_sessions.setdefault(uid, {})
     gen  = SocialMediaPostGenerator()
-    gen.setup_business(data.get('business_info', {}))
+    gen.setup_business(info)
     user_sessions[uid]['generator'] = gen
+    # Persist to DB so /api/get_business can retrieve it later
+    UserManager.save_business_profile(uid, info)
     return jsonify({'success': True})
+
+
+@app.route('/api/get_business', methods=['GET'])
+@login_required
+def api_get_business():
+    profile = getattr(current_user, 'business_profile', None)
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except Exception:
+            profile = {}
+    # Fallback to in-memory session
+    if not profile:
+        uid = _uid()
+        profile = user_sessions.get(uid, {}).get('business', {})
+    return jsonify({'success': True, 'business_info': profile or {}})
 
 
 @app.route('/api/setup_tokens', methods=['POST'])
@@ -532,14 +563,19 @@ def api_setup_tokens():
 
 
 @app.route('/api/generate_weekly', methods=['POST'])
+@app.route('/api/generate_posts', methods=['POST'])
 @login_required
 def api_generate_weekly():
     uid = _uid()
     gen = user_sessions.get(uid, {}).get('generator', SocialMediaPostGenerator())
-    return jsonify({'success': True, 'schedule': gen.generate_weekly_schedule()})
+    schedule = gen.generate_weekly_schedule()
+    # Normalise response — generate.html expects {posts: [...]}
+    posts = schedule if isinstance(schedule, list) else schedule.get('posts', [])
+    return jsonify({'success': True, 'posts': posts, 'schedule': schedule})
 
 
 @app.route('/api/generate_post', methods=['POST'])
+@app.route('/api/generate_single', methods=['POST'])
 @login_required
 def api_generate_post():
     data     = request.json or {}
@@ -547,7 +583,8 @@ def api_generate_post():
     template = data.get('template', 'instagram_location')
     gen      = user_sessions.get(uid, {}).get('generator', SocialMediaPostGenerator())
     try:
-        return jsonify({'success': True, 'post': gen.generate_post(template)})
+        post = gen.generate_post(template)
+        return jsonify({'success': True, 'post': post})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -556,6 +593,70 @@ def api_generate_post():
 @login_required
 def api_schedule_post():
     return jsonify(PostScheduler().schedule(request.json))
+
+
+@app.route('/api/scheduled_posts', methods=['GET'])
+@login_required
+def api_scheduled_posts():
+    """Return posts for the calendar week view. Reads from post_history."""
+    uid      = _uid()
+    from_dt  = request.args.get('from', '')
+    to_dt    = request.args.get('to', '')
+    db       = get_db()
+    try:
+        rows = db.execute(
+            'SELECT * FROM post_history WHERE user_id = ? AND status = "scheduled" '
+            'ORDER BY scheduled_at ASC',
+            (uid,)
+        ).fetchall()
+        posts = []
+        for row in rows:
+            posts.append({
+                'id':             row['id'],
+                'caption':        row['caption'],
+                'platforms':      json.loads(row['platforms'] or '[]'),
+                'status':         row['status'],
+                'scheduled_date': row['scheduled_at'],
+                'time':           '',
+            })
+    except Exception:
+        posts = []
+    return jsonify({'success': True, 'posts': posts})
+
+
+@app.route('/api/bulk_schedule', methods=['POST'])
+@login_required
+def api_bulk_schedule():
+    data  = request.json or {}
+    uid   = _uid()
+    posts = data.get('posts', [])
+    for p in posts:
+        UserManager.log_post(
+            user_id      = uid,
+            caption      = p.get('caption', ''),
+            content_type = 'text',
+            platforms    = p.get('platforms'),
+            results      = {},
+            scheduled_at = p.get('scheduled_date'),
+            status       = 'scheduled',
+        )
+    return jsonify({'success': True, 'count': len(posts)})
+
+
+@app.route('/api/delete_post', methods=['POST'])
+@login_required
+def api_delete_post():
+    data    = request.json or {}
+    post_id = data.get('post_id')
+    uid     = _uid()
+    if post_id:
+        db = get_db()
+        try:
+            db.execute('DELETE FROM post_history WHERE id = ? AND user_id = ?', (post_id, uid))
+            db.commit()
+        except Exception:
+            pass
+    return jsonify({'success': True})
 
 
 @app.route('/api/analytics', methods=['POST'])
@@ -730,6 +831,5 @@ def auth_tiktok_callback():
 
 if __name__ == '__main__':
     init_db()
-    print('🚀 Post-Pilot — Smart Social Media Hub')
-    print('🌐 Open: http://localhost:5000')
+    print('Post-Pilot running at http://localhost:5000')
     app.run(debug=True, port=5000)
