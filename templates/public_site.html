@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ seo.title or site.name or 'My Business' }}</title>
+  <meta name="description" content="{{ seo.description or '' }}">
+  <meta name="keywords" content="{{ seo.keywords or '' }}">
+  <meta property="og:title" content="{{ seo.title or site.name or 'My Business' }}">
+  <meta property="og:description" content="{{ seo.description or '' }}">
+  <meta property="og:image" content="{{ site.logo_url or '' }}">
+  <meta property="og:type" content="website">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --brand: {{ primary_color or '#6366f1' }}; }
+    .btn-brand { background: var(--brand); color: #fff; }
+    .btn-brand:hover { opacity: .88; }
+    .text-brand { color: var(--brand); }
+    .border-brand { border-color: var(--brand); }
+    .bg-brand { background: var(--brand); }
+    {% if theme == 'minimal' %}
+    body { font-family: 'Georgia', serif; background: #fff; color: #111; }
+    .site-nav { background: #fff; border-bottom: 1px solid #e5e7eb; }
+    .hero-section { background: #f9fafb; }
+    .card { border: 1px solid #e5e7eb; background: #fff; }
+    {% elif theme == 'bold' %}
+    body { font-family: 'Arial Black', sans-serif; background: #0a0a0a; color: #fff; }
+    .site-nav { background: #000; }
+    .hero-section { background: var(--brand); }
+    .hero-section h1 { color: #fff; }
+    .card { background: #1a1a1a; border: none; }
+    {% else %}
+    body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: #1e293b; }
+    .site-nav { background: #0f172a; }
+    .hero-section { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); }
+    .card { background: #fff; border: 1px solid #e2e8f0; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    {% endif %}
+    html { scroll-behavior: smooth; }
+    .preview-bar { position: sticky; top: 0; z-index: 9999; background: #fbbf24; color: #000; text-align: center; padding: .5rem 1rem; font-size: .85rem; font-weight: 600; }
+    section { scroll-margin-top: 4rem; }
+  </style>
+</head>
+<body>
+
+{# ── PREVIEW BANNER ──────────────────────────────────────────────── #}
+{% if preview %}
+<div class="preview-bar">
+  ⚡ Preview Mode — This is how your site looks to visitors.
+  <a href="/website" style="margin-left:.75rem;text-decoration:underline;">Edit Site →</a>
+</div>
+{% endif %}
+
+{# ── NAV ─────────────────────────────────────────────────────────── #}
+<nav class="site-nav sticky top-0 z-50 shadow">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+    <a href="#hero" class="flex items-center gap-3">
+      {% if site.logo_url %}
+        <img src="{{ site.logo_url }}" alt="Logo" class="h-9 w-9 rounded-full object-cover">
+      {% endif %}
+      <span class="font-bold text-lg {% if theme == 'minimal' %}text-gray-900{% else %}text-white{% endif %}">{{ site.name or 'My Business' }}</span>
+    </a>
+    <div class="hidden md:flex items-center gap-6 text-sm {% if theme == 'minimal' %}text-gray-600{% else %}text-gray-300{% endif %}">
+      {% for sec in sections %}
+        <a href="#{{ sec.id }}" class="hover:text-brand transition-colors">{{ sec.label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</nav>
+
+{# ── SECTIONS ─────────────────────────────────────────────────────── #}
+{% for sec in sections %}
+
+  {# HERO #}
+  {% if sec.id == 'hero' %}
+  <section id="hero" class="hero-section py-24 px-6">
+    <div class="max-w-4xl mx-auto text-center">
+      {% if site.logo_url and theme != 'bold' %}
+        <img src="{{ site.logo_url }}" alt="{{ site.name }}" class="h-20 w-20 rounded-2xl object-cover mx-auto mb-6 shadow-lg">
+      {% endif %}
+      <h1 class="text-5xl md:text-6xl font-black mb-4 {% if theme != 'minimal' %}text-white{% endif %}">{{ site.name or 'Welcome' }}</h1>
+      {% if site.tagline %}
+        <p class="text-xl md:text-2xl mb-8 {% if theme == 'minimal' %}text-gray-500{% else %}text-gray-300{% endif %}">{{ site.tagline }}</p>
+      {% endif %}
+      {% if site.cta_text %}
+        <a href="{{ site.cta_url or '#contact' }}" class="btn-brand inline-block px-8 py-4 rounded-2xl font-bold text-lg transition">{{ site.cta_text }}</a>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ABOUT #}
+  {% if sec.id == 'about' %}
+  <section id="about" class="py-20 px-6">
+    <div class="max-w-3xl mx-auto text-center">
+      <h2 class="text-3xl font-bold mb-6 text-brand">About Us</h2>
+      <p class="text-lg leading-relaxed {% if theme == 'bold' %}text-gray-300{% else %}text-gray-600{% endif %}">{{ site.about or 'We are a local business passionate about serving our community.' }}</p>
+    </div>
+  </section>
+  {% endif %}
+
+  {# SERVICES #}
+  {% if sec.id == 'services' %}
+  <section id="services" class="py-20 px-6 {% if theme == 'minimal' %}bg-gray-50{% elif theme == 'bold' %}bg-[#111]{% else %}bg-white{% endif %}">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl font-bold text-center mb-12 text-brand">Our Services</h2>
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% if site.services %}
+          {% for svc in site.services %}
+          <div class="card rounded-2xl p-6">
+            {% if svc.icon %}<div class="text-3xl mb-3">{{ svc.icon }}</div>{% endif %}
+            <h3 class="font-bold text-lg mb-2">{{ svc.name }}</h3>
+            <p class="text-sm {% if theme == 'bold' %}text-gray-400{% else %}text-gray-500{% endif %}">{{ svc.description or '' }}</p>
+            {% if svc.price %}<p class="mt-3 font-semibold text-brand">{{ svc.price }}</p>{% endif %}
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="card rounded-2xl p-6 col-span-3 text-center text-gray-400 py-12">No services listed yet.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# POSTS / FEED #}
+  {% if sec.id == 'posts' %}
+  <section id="posts" class="py-20 px-6">
+    <div class="max-w-6xl mx-auto">
+      <h2 class="text-3xl font-bold text-center mb-12 text-brand">Latest Updates</h2>
+      <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% if site.recent_posts %}
+          {% for post in site.recent_posts[:6] %}
+          <div class="card rounded-2xl overflow-hidden">
+            {% if post.image_url %}
+              <img src="{{ post.image_url }}" alt="Post" class="w-full h-48 object-cover">
+            {% endif %}
+            <div class="p-5">
+              <p class="text-sm {% if theme == 'bold' %}text-gray-300{% else %}text-gray-700{% endif %} leading-relaxed">{{ post.caption[:160] }}{% if post.caption|length > 160 %}…{% endif %}</p>
+              {% if post.created_at %}
+                <p class="text-xs text-gray-400 mt-3">{{ post.created_at }}</p>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="card rounded-2xl p-6 col-span-3 text-center text-gray-400 py-12">No posts yet — content will appear here once published.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# HOURS #}
+  {% if sec.id == 'hours' %}
+  <section id="hours" class="py-20 px-6 {% if theme == 'minimal' %}bg-gray-50{% elif theme == 'bold' %}bg-[#111]{% else %}bg-slate-50{% endif %}">
+    <div class="max-w-xl mx-auto">
+      <h2 class="text-3xl font-bold text-center mb-10 text-brand">Hours</h2>
+      {% if site.hours %}
+      <div class="card rounded-2xl overflow-hidden">
+        {% for day, hrs in site.hours.items() %}
+        <div class="flex justify-between px-6 py-3 {% if not loop.last %}border-b {% if theme == 'bold' %}border-gray-800{% else %}border-gray-100{% endif %}{% endif %}">
+          <span class="font-medium">{{ day }}</span>
+          <span class="{% if theme == 'bold' %}text-gray-300{% else %}text-gray-500{% endif %}">{{ hrs }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p class="text-center text-gray-400">Hours not listed yet.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# CONTACT #}
+  {% if sec.id == 'contact' %}
+  <section id="contact" class="py-20 px-6">
+    <div class="max-w-2xl mx-auto">
+      <h2 class="text-3xl font-bold text-center mb-10 text-brand">Contact Us</h2>
+      <div class="card rounded-2xl p-8 space-y-4">
+        {% if site.address %}
+        <div class="flex items-start gap-3">
+          <span class="text-2xl">📍</span>
+          <span class="{% if theme == 'bold' %}text-gray-300{% else %}text-gray-700{% endif %}">{{ site.address }}</span>
+        </div>
+        {% endif %}
+        {% if site.phone %}
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">📞</span>
+          <a href="tel:{{ site.phone }}" class="text-brand hover:underline">{{ site.phone }}</a>
+        </div>
+        {% endif %}
+        {% if site.email %}
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">✉️</span>
+          <a href="mailto:{{ site.email }}" class="text-brand hover:underline">{{ site.email }}</a>
+        </div>
+        {% endif %}
+        {% if site.website_url %}
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🌐</span>
+          <a href="{{ site.website_url }}" target="_blank" class="text-brand hover:underline">{{ site.website_url }}</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# SOCIALS #}
+  {% if sec.id == 'socials' %}
+  <section id="socials" class="py-16 px-6 {% if theme == 'minimal' %}bg-gray-50{% elif theme == 'bold' %}bg-[#111]{% else %}bg-slate-50{% endif %}">
+    <div class="max-w-xl mx-auto text-center">
+      <h2 class="text-3xl font-bold mb-8 text-brand">Find Us Online</h2>
+      <div class="flex flex-wrap justify-center gap-4">
+        {% if socials.facebook %}
+          <a href="{{ socials.facebook }}" target="_blank" class="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#1877F2] text-white hover:opacity-90 transition">📘 Facebook</a>
+        {% endif %}
+        {% if socials.instagram %}
+          <a href="{{ socials.instagram }}" target="_blank" class="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-[#f09433] to-[#bc1888] text-white hover:opacity-90 transition">📸 Instagram</a>
+        {% endif %}
+        {% if socials.tiktok %}
+          <a href="{{ socials.tiktok }}" target="_blank" class="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#010101] text-white border border-white/20 hover:opacity-90 transition">🎵 TikTok</a>
+        {% endif %}
+        {% if socials.youtube %}
+          <a href="{{ socials.youtube }}" target="_blank" class="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#FF0000] text-white hover:opacity-90 transition">▶️ YouTube</a>
+        {% endif %}
+        {% if socials.google %}
+          <a href="{{ socials.google }}" target="_blank" class="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#4285F4] text-white hover:opacity-90 transition">📍 Google</a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+{% endfor %}
+
+{# ── FOOTER ──────────────────────────────────────────────────────── #}
+<footer class="{% if theme == 'minimal' %}bg-white border-t border-gray-200{% elif theme == 'bold' %}bg-black{% else %}bg-[#0f172a]{% endif %} py-8 px-6 text-center">
+  <p class="text-sm {% if theme == 'minimal' %}text-gray-400{% else %}text-gray-500{% endif %}">
+    &copy; {{ site.name or 'My Business' }} {{ '' | strftime('%Y') if '' | strftime else '2026' }}.
+    {% if not preview %}
+      <span class="ml-2 opacity-50">Powered by <a href="/" class="hover:underline">Post-Pilot</a></span>
+    {% endif %}
+  </p>
+</footer>
+
+</body>
+</html>

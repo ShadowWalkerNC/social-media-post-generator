@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connect Platforms - Post-Pilot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #07071a; }
+    .platform-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06); transition: border-color .2s; }
+    .platform-card:hover { border-color: rgba(255,255,255,0.15); }
+  </style>
+</head>
+<body class="text-white min-h-screen">
+
+  <!-- NAV -->
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-10">
+      <a href="/dashboard" class="text-sm text-gray-400 hover:text-white transition flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        Dashboard
+      </a>
+      <a href="/setup" class="text-sm px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition">Settings</a>
+    </div>
+
+    <!-- HEADER -->
+    <div class="text-center mb-12">
+      <p class="text-xs uppercase tracking-widest text-indigo-400 mb-3 font-semibold">Platform Connections</p>
+      <h1 class="text-4xl md:text-5xl font-black mb-4">Link your platforms</h1>
+      <p class="text-gray-400 max-w-xl mx-auto text-lg">Authorize each platform once. Post-Pilot handles publishing, scheduling, and syncing automatically.</p>
+    </div>
+
+    <!-- PLATFORM GRID -->
+    <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4" id="platform-grid">
+      <div class="col-span-full text-center text-gray-500 py-12">Loading platforms...</div>
+    </div>
+
+    <!-- FOOTER NOTE -->
+    <p class="text-center text-xs text-gray-600 mt-10">Your credentials are stored securely and never shared. You can disconnect at any time.</p>
+  </div>
+
+<script>
+const PLATFORMS = [
+  {
+    id: 'fb',
+    name: 'Facebook',
+    desc: 'Publish page content and schedule posts via Meta Graph API.',
+    href: '/auth/facebook',
+    color: '#1877F2',
+    icon: '<svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.97h-1.513c-1.491 0-1.956.93-1.956 1.874v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>'
+  },
+  {
+    id: 'ig',
+    name: 'Instagram',
+    desc: 'Connect your Instagram business account for image and reel publishing.',
+    href: '/auth/facebook',
+    color: '#E1306C',
+    icon: '<svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg>'
+  },
+  {
+    id: 'tt',
+    name: 'TikTok',
+    desc: 'Enable TikTok video publishing and trend-based content workflows.',
+    href: '/auth/tiktok',
+    color: '#69C9D0',
+    icon: '<svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.28 6.28 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.78 1.52V6.79a4.85 4.85 0 01-1.01-.1z"/></svg>'
+  },
+  {
+    id: 'yt',
+    name: 'YouTube',
+    desc: 'Upload videos and push announcements directly to your channel.',
+    href: '/auth/google',
+    color: '#FF0000',
+    icon: '<svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>'
+  },
+  {
+    id: 'gb',
+    name: 'Google Business',
+    desc: 'Push updates, special offers, and hours to your Business Profile.',
+    href: '/auth/google',
+    color: '#4285F4',
+    icon: '<svg class="w-7 h-7" fill="currentColor" viewBox="0 0 24 24"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg>'
+  },
+  {
+    id: 'web',
+    name: 'Website Hub',
+    desc: 'Sync posts to your Post-Pilot business site via embed or webhook.',
+    href: '/website',
+    color: '#10b981',
+    icon: '<svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/></svg>'
+  }
+];
+
+async function loadStatus() {
+  try {
+    const res = await fetch('/api/connection_status');
+    const data = await res.json();
+    return data.connections || data.platforms || {};
+  } catch(e) {
+    return {};
+  }
+}
+
+function renderCard(p, connected) {
+  const badge = connected
+    ? `<span class="text-xs px-2 py-1 rounded-full font-semibold" style="background:${p.color}20;color:${p.color};border:1px solid ${p.color}40">Connected</span>`
+    : `<span class="text-xs px-2 py-1 rounded-full" style="background:rgba(255,255,255,.05);color:#9ca3af;border:1px solid rgba(255,255,255,.1)">Not connected</span>`;
+
+  const btn = p.id === 'web'
+    ? `<a href="${p.href}" class="inline-flex items-center justify-center w-full py-3 rounded-xl font-semibold text-sm text-white transition" style="background:linear-gradient(135deg,${p.color},#059669)">Open Website Hub</a>`
+    : connected
+      ? `<button onclick="disconnectPlatform('${p.id}')" class="inline-flex items-center justify-center w-full py-3 rounded-xl font-semibold text-sm text-red-400 bg-red-400/10 border border-red-400/30 hover:bg-red-400/20 transition">Disconnect</button>`
+      : `<a href="${p.href}" class="inline-flex items-center justify-center w-full py-3 rounded-xl font-semibold text-sm text-white transition" style="background:linear-gradient(135deg,${p.color},#4f46e5)">Connect ${p.name}</a>`;
+
+  return `
+    <div class="platform-card rounded-2xl p-5" data-pid="${p.id}">
+      <div class="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <div class="mb-2" style="color:${p.color}">${p.icon}</div>
+          <h2 class="font-bold text-lg">${p.name}</h2>
+          <p class="text-sm text-gray-400 mt-1 leading-relaxed">${p.desc}</p>
+        </div>
+        ${badge}
+      </div>
+      ${btn}
+    </div>`;
+}
+
+async function render() {
+  const statuses = await loadStatus();
+  const grid = document.getElementById('platform-grid');
+  grid.innerHTML = PLATFORMS.map(p => renderCard(p, !!statuses[p.id])).join('');
+}
+
+async function disconnectPlatform(pid) {
+  const p = PLATFORMS.find(x => x.id === pid);
+  if (!confirm('Disconnect ' + p.name + '? You can reconnect at any time.')) return;
+  try {
+    const res = await fetch('/auth/disconnect/' + pid);
+    const data = await res.json();
+    if (data.success) {
+      render();
+    } else {
+      alert('Could not disconnect: ' + (data.message || 'Unknown error'));
+    }
+  } catch(e) {
+    alert('Network error. Please try again.');
+  }
+}
+
+render();
+</script>
+</body>
+</html>
