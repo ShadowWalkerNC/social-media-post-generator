@@ -1,62 +1,69 @@
 """
-auth_manager.py — Token Persistence, Refresh & Expiry (Phase 4 Session 1)
+auth_manager.py — Token Persistence, Refresh & Expiry
 
-Handles encrypted token storage in SQLite (dev) / PostgreSQL (prod).
-Auto-refreshes Google tokens. Detects expiry. Signals dashboard alerts.
+Handles Fernet-encrypted token storage via db.py (SQLite dev / Postgres prod).
+Auto-refreshes Google and TikTok tokens.
 """
 
 import os
-import sqlite3
 import json
 import logging
 from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 import requests
 
+from modules.db import get_connection, placeholder, adapt_schema, USE_POSTGRES
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Encryption key — load from env or generate (dev only)
+# Encryption key
 # ---------------------------------------------------------------------------
 ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY')
 if not ENCRYPTION_KEY:
     ENCRYPTION_KEY = Fernet.generate_key().decode()
-    logger.warning('TOKEN_ENCRYPTION_KEY not set — generated ephemeral key (dev only)')
+    logger.warning('TOKEN_ENCRYPTION_KEY not set — ephemeral key generated (dev only)')
 
-fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
-
-DB_PATH = os.environ.get('DATABASE_URL', 'postpilot.db')
+fernet = Fernet(
+    ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
+)
 
 
 # ---------------------------------------------------------------------------
-# Database bootstrap
+# DDL
 # ---------------------------------------------------------------------------
+_CREATE_TOKENS = adapt_schema('''
+    CREATE TABLE IF NOT EXISTS platform_tokens (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id       TEXT    NOT NULL DEFAULT 'default',
+        platform      TEXT    NOT NULL,
+        access_token  TEXT    NOT NULL,
+        refresh_token TEXT,
+        expires_at    TEXT,
+        token_meta    TEXT,
+        updated_at    TEXT    NOT NULL,
+        UNIQUE (user_id, platform)
+    )
+''')
+
+
 def init_db():
-    """Create tokens table if it doesn't exist."""
-    conn = _get_conn()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS platform_tokens (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       TEXT    NOT NULL DEFAULT 'default',
-            platform      TEXT    NOT NULL,
-            access_token  TEXT    NOT NULL,
-            refresh_token TEXT,
-            expires_at    TEXT,
-            token_meta    TEXT,
-            updated_at    TEXT    NOT NULL
-        )
-    ''')
-    conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_platform ON platform_tokens(user_id, platform)')
-    conn.commit()
-    conn.close()
-
-
-def _get_conn():
-    return sqlite3.connect(DB_PATH)
+    """Create platform_tokens table if it does not exist."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(_CREATE_TOKENS)
+        conn.commit()
+        logger.info('auth_manager: platform_tokens ready')
+    except Exception as exc:
+        logger.error('auth_manager init_db failed: %s', exc)
+        conn.rollback()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
-# Encrypt / decrypt helpers
+# Helpers
 # ---------------------------------------------------------------------------
 def _encrypt(value: str) -> str:
     return fernet.encrypt(value.encode()).decode()
@@ -66,76 +73,93 @@ def _decrypt(value: str) -> str:
     return fernet.decrypt(value.encode()).decode()
 
 
+def _unpack_row(row) -> tuple:
+    """Return (access_token, refresh_token, expires_at, token_meta) from either backend."""
+    if isinstance(row, dict):
+        return row['access_token'], row['refresh_token'], row['expires_at'], row['token_meta']
+    return row[0], row[1], row[2], row[3]
+
+
 # ---------------------------------------------------------------------------
 # Save token
 # ---------------------------------------------------------------------------
 def save_token(platform: str, access_token: str, refresh_token: str = None,
                expires_at: datetime = None, meta: dict = None, user_id: str = 'default'):
-    """
-    Persist an encrypted token for a platform.
-
-    Args:
-        platform:      'facebook' | 'instagram' | 'google' | 'tiktok' | 'youtube'
-        access_token:  The bearer token
-        refresh_token: Long-lived refresh token (Google, TikTok)
-        expires_at:    datetime when access_token expires
-        meta:          Any extra platform-specific data (page_id, etc.)
-        user_id:       User identifier (default for single-user mode)
-    """
-    conn = _get_conn()
-    enc_access = _encrypt(access_token)
+    enc_access  = _encrypt(access_token)
     enc_refresh = _encrypt(refresh_token) if refresh_token else None
     expires_str = expires_at.isoformat() if expires_at else None
-    meta_str = json.dumps(meta) if meta else None
-    now = datetime.utcnow().isoformat()
+    meta_str    = json.dumps(meta) if meta else None
+    now         = datetime.utcnow().isoformat()
+    p           = placeholder
 
-    conn.execute('''
-        INSERT INTO platform_tokens
-            (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, platform) DO UPDATE SET
-            access_token  = excluded.access_token,
-            refresh_token = COALESCE(excluded.refresh_token, platform_tokens.refresh_token),
-            expires_at    = excluded.expires_at,
-            token_meta    = COALESCE(excluded.token_meta, platform_tokens.token_meta),
-            updated_at    = excluded.updated_at
-    ''', (user_id, platform, enc_access, enc_refresh, expires_str, meta_str, now))
-    conn.commit()
-    conn.close()
-    logger.info('Token saved for platform=%s user=%s', platform, user_id)
+    if USE_POSTGRES:
+        sql = f'''
+            INSERT INTO platform_tokens
+                (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
+            VALUES ({p},{p},{p},{p},{p},{p},{p})
+            ON CONFLICT (user_id, platform) DO UPDATE SET
+                access_token  = EXCLUDED.access_token,
+                refresh_token = COALESCE(EXCLUDED.refresh_token, platform_tokens.refresh_token),
+                expires_at    = EXCLUDED.expires_at,
+                token_meta    = COALESCE(EXCLUDED.token_meta, platform_tokens.token_meta),
+                updated_at    = EXCLUDED.updated_at
+        '''
+    else:
+        sql = f'''
+            INSERT INTO platform_tokens
+                (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
+            VALUES ({p},{p},{p},{p},{p},{p},{p})
+            ON CONFLICT(user_id, platform) DO UPDATE SET
+                access_token  = excluded.access_token,
+                refresh_token = COALESCE(excluded.refresh_token, platform_tokens.refresh_token),
+                expires_at    = excluded.expires_at,
+                token_meta    = COALESCE(excluded.token_meta, platform_tokens.token_meta),
+                updated_at    = excluded.updated_at
+        '''
+
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (user_id, platform, enc_access, enc_refresh, expires_str, meta_str, now))
+        conn.commit()
+        logger.info('Token saved: platform=%s user=%s', platform, user_id)
+    except Exception as exc:
+        logger.error('save_token failed: %s', exc)
+        conn.rollback()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
 # Load token
 # ---------------------------------------------------------------------------
 def load_token(platform: str, user_id: str = 'default') -> dict | None:
-    """
-    Retrieve and decrypt a stored token.
-
-    Returns dict with keys: access_token, refresh_token, expires_at, meta
-    Returns None if not found.
-    """
-    conn = _get_conn()
-    row = conn.execute(
-        'SELECT access_token, refresh_token, expires_at, token_meta FROM platform_tokens '
-        'WHERE user_id=? AND platform=?',
-        (user_id, platform)
-    ).fetchone()
-    conn.close()
+    p   = placeholder
+    sql = (
+        f'SELECT access_token, refresh_token, expires_at, token_meta '
+        f'FROM platform_tokens WHERE user_id={p} AND platform={p}'
+    )
+    conn = get_connection()
+    try:
+        if USE_POSTGRES:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            cur = conn.cursor()
+        cur.execute(sql, (user_id, platform))
+        row = cur.fetchone()
+    finally:
+        conn.close()
 
     if not row:
         return None
 
-    access_token  = _decrypt(row[0])
-    refresh_token = _decrypt(row[1]) if row[1] else None
-    expires_at    = datetime.fromisoformat(row[2]) if row[2] else None
-    meta          = json.loads(row[3]) if row[3] else {}
-
+    a, r, e, m = _unpack_row(row)
     return {
-        'access_token':  access_token,
-        'refresh_token': refresh_token,
-        'expires_at':    expires_at,
-        'meta':          meta,
+        'access_token':  _decrypt(a),
+        'refresh_token': _decrypt(r) if r else None,
+        'expires_at':    datetime.fromisoformat(e) if e else None,
+        'meta':          json.loads(m) if m else {},
     }
 
 
@@ -143,24 +167,13 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
 # Expiry checks
 # ---------------------------------------------------------------------------
 def is_token_expired(platform: str, user_id: str = 'default', warn_days: int = 7) -> str:
-    """
-    Check token expiry status.
-
-    Returns:
-        'ok'      — valid, not expiring soon
-        'warning' — expires within warn_days
-        'expired' — already expired
-        'missing' — no token stored
-    """
     token = load_token(platform, user_id)
     if not token:
         return 'missing'
     if not token['expires_at']:
-        return 'ok'  # No expiry set (e.g. long-lived FB token without explicit expiry tracking)
-
-    now = datetime.utcnow()
+        return 'ok'
+    now     = datetime.utcnow()
     expires = token['expires_at']
-
     if now >= expires:
         return 'expired'
     if now >= expires - timedelta(days=warn_days):
@@ -169,60 +182,37 @@ def is_token_expired(platform: str, user_id: str = 'default', warn_days: int = 7
 
 
 def get_all_token_statuses(user_id: str = 'default') -> dict:
-    """
-    Returns expiry status for all platforms.
-    Used by dashboard to show red/yellow/green indicators.
-    """
     platforms = ['facebook', 'instagram', 'google', 'tiktok', 'youtube']
     return {p: is_token_expired(p, user_id) for p in platforms}
 
 
 # ---------------------------------------------------------------------------
-# Google OAuth auto-refresh
+# Google token refresh
 # ---------------------------------------------------------------------------
 def refresh_google_token(user_id: str = 'default') -> str | None:
-    """
-    Use stored refresh_token to get a new Google access token.
-    Silently updates DB. Returns new access_token or None on failure.
-    """
     token = load_token('google', user_id)
     if not token or not token['refresh_token']:
         logger.error('Cannot refresh Google token — no refresh_token stored')
         return None
-
-    client_id     = os.environ.get('GOOGLE_CLIENT_ID')
-    client_secret = os.environ.get('GOOGLE_CLIENT_SECRET')
-
     resp = requests.post('https://oauth2.googleapis.com/token', data={
         'grant_type':    'refresh_token',
         'refresh_token': token['refresh_token'],
-        'client_id':     client_id,
-        'client_secret': client_secret,
-    })
-
+        'client_id':     os.environ.get('GOOGLE_CLIENT_ID'),
+        'client_secret': os.environ.get('GOOGLE_CLIENT_SECRET'),
+    }, timeout=10)
     if resp.status_code != 200:
         logger.error('Google token refresh failed: %s', resp.text)
         return None
-
-    data = resp.json()
-    new_access  = data['access_token']
-    expires_at  = datetime.utcnow() + timedelta(seconds=data.get('expires_in', 3600))
-
-    save_token('google', new_access,
-               refresh_token=token['refresh_token'],
-               expires_at=expires_at,
-               meta=token['meta'],
-               user_id=user_id)
-
+    data       = resp.json()
+    new_access = data['access_token']
+    expires_at = datetime.utcnow() + timedelta(seconds=data.get('expires_in', 3600))
+    save_token('google', new_access, refresh_token=token['refresh_token'],
+               expires_at=expires_at, meta=token['meta'], user_id=user_id)
     logger.info('Google token refreshed for user=%s', user_id)
     return new_access
 
 
 def get_valid_google_token(user_id: str = 'default') -> str | None:
-    """
-    Returns a valid Google access token, auto-refreshing if needed.
-    Call this before every Google API request.
-    """
     status = is_token_expired('google', user_id, warn_days=0)
     if status == 'expired':
         return refresh_google_token(user_id)
@@ -233,57 +223,48 @@ def get_valid_google_token(user_id: str = 'default') -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# TikTok daily refresh
+# TikTok token refresh
 # ---------------------------------------------------------------------------
 def refresh_tiktok_token(user_id: str = 'default') -> str | None:
-    """
-    Refresh TikTok access token using stored refresh_token.
-    TikTok tokens expire every 24 hours.
-    """
     token = load_token('tiktok', user_id)
     if not token or not token['refresh_token']:
         logger.error('Cannot refresh TikTok token — no refresh_token stored')
         return None
-
-    client_key    = os.environ.get('TIKTOK_CLIENT_KEY')
-    client_secret = os.environ.get('TIKTOK_CLIENT_SECRET')
-
     resp = requests.post('https://open.tiktokapis.com/v2/oauth/token/', json={
-        'client_key':    client_key,
-        'client_secret': client_secret,
+        'client_key':    os.environ.get('TIKTOK_CLIENT_KEY'),
+        'client_secret': os.environ.get('TIKTOK_CLIENT_SECRET'),
         'grant_type':    'refresh_token',
         'refresh_token': token['refresh_token'],
-    })
-
+    }, timeout=10)
     if resp.status_code != 200:
         logger.error('TikTok token refresh failed: %s', resp.text)
         return None
-
-    data = resp.json().get('data', {})
-    new_access    = data.get('access_token')
-    new_refresh   = data.get('refresh_token', token['refresh_token'])
-    expires_in    = data.get('expires_in', 86400)
-    expires_at    = datetime.utcnow() + timedelta(seconds=expires_in)
-
-    save_token('tiktok', new_access,
-               refresh_token=new_refresh,
-               expires_at=expires_at,
-               meta=token['meta'],
-               user_id=user_id)
-
+    data        = resp.json().get('data', {})
+    new_access  = data.get('access_token')
+    new_refresh = data.get('refresh_token', token['refresh_token'])
+    expires_at  = datetime.utcnow() + timedelta(seconds=data.get('expires_in', 86400))
+    save_token('tiktok', new_access, refresh_token=new_refresh,
+               expires_at=expires_at, meta=token['meta'], user_id=user_id)
     logger.info('TikTok token refreshed for user=%s', user_id)
     return new_access
 
 
 # ---------------------------------------------------------------------------
-# Delete token (on reauth or account disconnect)
+# Delete token
 # ---------------------------------------------------------------------------
 def delete_token(platform: str, user_id: str = 'default'):
-    conn = _get_conn()
-    conn.execute('DELETE FROM platform_tokens WHERE user_id=? AND platform=?', (user_id, platform))
-    conn.commit()
-    conn.close()
-    logger.info('Token deleted for platform=%s user=%s', platform, user_id)
+    p   = placeholder
+    sql = f'DELETE FROM platform_tokens WHERE user_id={p} AND platform={p}'
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, (user_id, platform))
+        conn.commit()
+        logger.info('Token deleted: platform=%s user=%s', platform, user_id)
+    except Exception as exc:
+        logger.error('delete_token failed: %s', exc)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -291,5 +272,5 @@ def delete_token(platform: str, user_id: str = 'default'):
 # ---------------------------------------------------------------------------
 try:
     init_db()
-except Exception as e:
-    logger.error('auth_manager init_db failed: %s', e)
+except Exception as _e:
+    logger.error('auth_manager bootstrap failed: %s', _e)
