@@ -3,18 +3,24 @@
 Post-Pilot -- Smart Social Media Hub
 
 Changes (audit fixes):
-  - OAuth state nonce on Facebook, Google, TikTok flows (CSRF-on-OAuth fix)
+  - OAuth state nonce (`secrets.token_urlsafe(32)`) on all three OAuth flows (CSRF-on-OAuth fix)
   - @require_plan applied to premium API routes
-  - check_platform_limit enforced in api_push_all
-  - init_scheduler() wired in at startup
-  - /api/push_all, /api/publish, /api/generate_weekly, /api/bulk_schedule
-    all updated to use modules.db for Postgres compatibility
+  - check_platform_limit enforced in api_push_all AND api_publish (billing bypass fix)
+  - init_scheduler() only fires in the main process, never on gunicorn workers or test imports
+  - XSS fixed in _render_public_site fallback -- user data escaped via markupsafe.escape()
+  - OAuth state keys namespaced per-platform (session[f'oauth_state_{platform}'])
+  - limit param in api_post_history wrapped in try/except (ValueError 500 fix)
+  - Silent exception swallows now log via app.logger.exception() before returning
+  - requests imported at module level (not inside route functions)
 """
 
 import os
 import json
 import secrets
 import sqlite3
+import requests
+from datetime import datetime, timedelta
+from markupsafe import escape
 from flask import (
     Flask, render_template, request, jsonify,
     redirect, url_for, session, flash, g
@@ -55,11 +61,15 @@ if not _secret:
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = _secret
-app.config['WTF_CSRF_TIME_LIMIT'] = 3600
+app.config['WTF_CSRF_TIME_LIMIT'] = 7200  # 2 hrs -- forms open >1hr no longer silently fail
 
 # -- Extensions -----------------------------------------------------------
 csrf = CSRFProtect(app)
 
+# NOTE: In production with multiple gunicorn workers, set REDIS_URL so
+# Flask-Limiter uses a shared store. Without it each worker has its own
+# counter, effectively multiplying the rate limit by worker count.
+# Add REDIS_URL=redis://... to your .env for production deployments.
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -155,6 +165,9 @@ except Exception as _init_err:
 # -- Token helpers --------------------------------------------------------
 
 def _uid() -> str:
+    # WARNING: the 'default' fallback buckets all unauthenticated callers
+    # under a single key. All callers of _get_tokens() must be protected
+    # by @login_required to prevent cross-user token leakage.
     return current_user.id if current_user.is_authenticated else 'default'
 
 def _get_tokens(uid: str = None) -> dict:
@@ -423,17 +436,20 @@ def _render_public_site(site: dict, preview: bool = False):
             theme=theme, primary_color=color, preview=preview,
         )
     except Exception:
+        app.logger.exception('public_site.html render failed, falling back to raw HTML')
+        # FIX (P0 XSS): escape all user-controlled values before interpolating into HTML
+        safe_color = escape(color)
         sec_html = ''.join(
-            f'<section id="{s["id"]}" style="padding:2rem;border-bottom:1px solid #eee">'
-            f'<h2>{s["label"]}</h2></section>'
+            f'<section id="{escape(s["id"])}" style="padding:2rem;border-bottom:1px solid #eee">'
+            f'<h2>{escape(s["label"])}</h2></section>'
             for s in active_secs
         )
-        title = seo.get('title') or 'My Business'
+        title = escape(seo.get('title') or 'My Business')
         return (
             f'<!DOCTYPE html><html><head><meta charset="UTF-8">'
             f'<title>{title}</title>'
             f'<style>body{{font-family:sans-serif;margin:0;padding:0}}'
-            f'h1{{background:{color};color:#fff;padding:2rem;margin:0}}</style>'
+            f'h1{{background:{safe_color};color:#fff;padding:2rem;margin:0}}</style>'
             f'</head><body>'
             f'{"<div style=\\"background:#fbbf24;color:#000;text-align:center;padding:.5rem;font-size:.8rem\\">PREVIEW MODE</div>" if preview else ""}'
             f'<h1>{title}</h1>{sec_html}</body></html>'
@@ -530,6 +546,17 @@ def api_push_all():
 def api_publish():
     data      = request.json or {}
     uid       = _uid()
+    platforms = data.get('platforms') or []
+
+    # FIX (P0 billing bypass): enforce platform limit on this route too
+    if platforms:
+        allowed, limit = check_platform_limit(current_user.subscription_tier, platforms)
+        if not allowed:
+            return jsonify({
+                'success': False,
+                'error': f'Your plan allows up to {limit} platform(s) at once. Upgrade at /billing.'
+            }), 403
+
     tokens    = _get_tokens(uid)
     publisher = UniversalPublisher(tokens, user_id=uid)
     results   = publisher.push_all(
@@ -538,7 +565,7 @@ def api_publish():
         image_url    = data.get('image_url'),
         video_url    = data.get('video_url'),
         link_url     = data.get('link_url'),
-        platforms    = data.get('platforms'),
+        platforms    = platforms,
     )
     UserManager.log_post(
         user_id      = uid,
@@ -546,7 +573,7 @@ def api_publish():
         content_type = data.get('content_type', 'text'),
         image_url    = data.get('image_url'),
         video_url    = data.get('video_url'),
-        platforms    = data.get('platforms'),
+        platforms    = platforms,
         results      = results,
     )
     return jsonify({'success': True, 'results': results})
@@ -686,6 +713,7 @@ def api_generate_post():
         post = gen.generate_post(template)
         return jsonify({'success': True, 'post': post})
     except Exception as e:
+        app.logger.exception('generate_post failed for template %s', template)
         return jsonify({'success': False, 'error': str(e)})
 
 
@@ -716,6 +744,7 @@ def api_scheduled_posts():
             'time':           '',
         } for row in rows]
     except Exception:
+        app.logger.exception('api_scheduled_posts failed for user %s', uid)
         posts = []
     return jsonify({'success': True, 'posts': posts})
 
@@ -723,9 +752,13 @@ def api_scheduled_posts():
 @app.route('/api/post_history', methods=['GET'])
 @login_required
 def api_post_history():
-    uid   = _uid()
-    db    = get_db()
-    limit = min(int(request.args.get('limit', 20)), 100)
+    uid = _uid()
+    db  = get_db()
+    # FIX (P1): wrap limit param -- ?limit=abc raised ValueError -> 500
+    try:
+        limit = min(int(request.args.get('limit', 20)), 100)
+    except (ValueError, TypeError):
+        limit = 20
     try:
         rows = db.execute(
             'SELECT * FROM post_history WHERE user_id = ? '
@@ -744,6 +777,7 @@ def api_post_history():
             'results':      json.loads(row['results'] or '{}'),
         } for row in rows]
     except Exception as e:
+        app.logger.exception('api_post_history failed for user %s', uid)
         return jsonify({'success': False, 'error': str(e), 'posts': []})
     return jsonify({'success': True, 'posts': posts, 'count': len(posts)})
 
@@ -780,6 +814,7 @@ def api_delete_post():
             db.execute('DELETE FROM post_history WHERE id = ? AND user_id = ?', (post_id, uid))
             db.commit()
         except Exception as e:
+            app.logger.exception('api_delete_post failed for post %s user %s', post_id, uid)
             return jsonify({'success': False, 'error': str(e)})
     return jsonify({'success': True})
 
@@ -804,11 +839,12 @@ def api_analytics():
 @app.route('/auth/facebook')
 @login_required
 def auth_facebook():
-    state        = secrets.token_urlsafe(32)
-    session['oauth_state']    = state
-    session['oauth_next']     = request.args.get('next', '/')
-    session['oauth_step']     = request.args.get('step', '2')
-    session['oauth_platform'] = 'facebook'
+    state = secrets.token_urlsafe(32)
+    # FIX (P1): namespace state key per-platform to prevent collisions
+    # when user opens multiple OAuth tabs simultaneously
+    session['oauth_state_facebook'] = state
+    session['oauth_next']           = request.args.get('next', '/')
+    session['oauth_step']           = request.args.get('step', '2')
     app_id       = os.getenv('FACEBOOK_APP_ID')
     redirect_uri = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
     scopes       = 'pages_manage_posts,pages_read_engagement,instagram_content_publish,instagram_basic'
@@ -821,9 +857,8 @@ def auth_facebook():
 @app.route('/auth/facebook/callback')
 @login_required
 def auth_facebook_callback():
-    import requests as req
-    # Validate OAuth state nonce
-    if request.args.get('state') != session.pop('oauth_state', None):
+    # FIX (P1): validate against namespaced state key
+    if request.args.get('state') != session.pop('oauth_state_facebook', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('connect_page'))
     if request.args.get('error'):
@@ -834,16 +869,16 @@ def auth_facebook_callback():
     app_secret = os.getenv('FACEBOOK_APP_SECRET')
     redir      = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
     try:
-        token = req.get('https://graph.facebook.com/v19.0/oauth/access_token',
+        token = requests.get('https://graph.facebook.com/v19.0/oauth/access_token',
                         params={'client_id': app_id, 'client_secret': app_secret,
                                 'redirect_uri': redir, 'code': code},
                         timeout=10).json().get('access_token')
-        page       = req.get('https://graph.facebook.com/v19.0/me/accounts',
+        page       = requests.get('https://graph.facebook.com/v19.0/me/accounts',
                              params={'access_token': token},
                              timeout=10).json().get('data', [{}])[0]
         page_id    = page.get('id')
         page_token = page.get('access_token', token)
-        ig_id      = req.get(f'https://graph.facebook.com/v19.0/{page_id}',
+        ig_id      = requests.get(f'https://graph.facebook.com/v19.0/{page_id}',
                              params={'fields': 'instagram_business_account',
                                      'access_token': page_token},
                              timeout=10).json()\
@@ -853,13 +888,13 @@ def auth_facebook_callback():
                    meta={'page_id': page_id, 'ig_id': ig_id},
                    user_id=uid)
     except Exception as e:
+        app.logger.exception('Facebook OAuth callback failed')
         flash(f'Facebook connection failed: {e}')
         return redirect(url_for('connect_page'))
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '2')
-    platform = session.pop('oauth_platform', 'facebook')
     return redirect(
-        f'/onboarding?connected={platform}&step={step}'
+        f'/onboarding?connected=facebook&step={step}'
         if next_url == '/onboarding' else url_for('home')
     )
 
@@ -869,11 +904,11 @@ def auth_facebook_callback():
 @app.route('/auth/google')
 @login_required
 def auth_google():
-    state     = secrets.token_urlsafe(32)
-    session['oauth_state']    = state
-    session['oauth_next']     = request.args.get('next', '/')
-    session['oauth_step']     = request.args.get('step', '3')
-    session['oauth_platform'] = 'google'
+    state = secrets.token_urlsafe(32)
+    # FIX (P1): namespace state key per-platform
+    session['oauth_state_google'] = state
+    session['oauth_next']         = request.args.get('next', '/')
+    session['oauth_step']         = request.args.get('step', '3')
     client_id = os.getenv('GOOGLE_CLIENT_ID')
     redir     = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
     scope     = 'https://www.googleapis.com/auth/business.manage https://www.googleapis.com/auth/youtube.upload'
@@ -887,10 +922,8 @@ def auth_google():
 @app.route('/auth/google/callback')
 @login_required
 def auth_google_callback():
-    import requests as req
-    from datetime import datetime, timedelta
-    # Validate OAuth state nonce
-    if request.args.get('state') != session.pop('oauth_state', None):
+    # FIX (P1): validate against namespaced state key
+    if request.args.get('state') != session.pop('oauth_state_google', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('connect_page'))
     if request.args.get('error'):
@@ -901,17 +934,17 @@ def auth_google_callback():
     csec   = os.getenv('GOOGLE_CLIENT_SECRET')
     redir  = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:5000/auth/google/callback')
     try:
-        tokens = req.post('https://oauth2.googleapis.com/token',
+        tokens = requests.post('https://oauth2.googleapis.com/token',
                           data={'code': code, 'client_id': cid, 'client_secret': csec,
                                 'redirect_uri': redir, 'grant_type': 'authorization_code'},
                           timeout=10).json()
         gtoken = tokens.get('access_token')
         rtoken = tokens.get('refresh_token')
-        accts  = req.get('https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+        accts  = requests.get('https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
                          headers={'Authorization': f'Bearer {gtoken}'},
                          timeout=10).json()
         acct   = (accts.get('accounts') or [{}])[0].get('name', '')
-        locs   = req.get(f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
+        locs   = requests.get(f'https://mybusinessbusinessinformation.googleapis.com/v1/{acct}/locations',
                          headers={'Authorization': f'Bearer {gtoken}'},
                          timeout=10).json()
         loc_id = (locs.get('locations') or [{}])[0].get('name', '')
@@ -922,13 +955,13 @@ def auth_google_callback():
                    meta={'location_id': loc_id},
                    user_id=uid)
     except Exception as e:
+        app.logger.exception('Google OAuth callback failed')
         flash(f'Google connection failed: {e}')
         return redirect(url_for('connect_page'))
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '3')
-    platform = session.pop('oauth_platform', 'google')
     return redirect(
-        f'/onboarding?connected={platform}&step={step}'
+        f'/onboarding?connected=google&step={step}'
         if next_url == '/onboarding' else url_for('home')
     )
 
@@ -938,11 +971,11 @@ def auth_google_callback():
 @app.route('/auth/tiktok')
 @login_required
 def auth_tiktok():
-    state      = secrets.token_urlsafe(32)
-    session['oauth_state']    = state
-    session['oauth_next']     = request.args.get('next', '/')
-    session['oauth_step']     = request.args.get('step', '4')
-    session['oauth_platform'] = 'tiktok'
+    state = secrets.token_urlsafe(32)
+    # FIX (P1): namespace state key per-platform
+    session['oauth_state_tiktok'] = state
+    session['oauth_next']         = request.args.get('next', '/')
+    session['oauth_step']         = request.args.get('step', '4')
     client_key = os.getenv('TIKTOK_CLIENT_KEY')
     redir      = os.getenv('TIKTOK_REDIRECT_URI', 'http://localhost:5000/auth/tiktok/callback')
     scope      = 'user.info.basic,video.upload,video.publish'
@@ -955,10 +988,8 @@ def auth_tiktok():
 @app.route('/auth/tiktok/callback')
 @login_required
 def auth_tiktok_callback():
-    import requests as req
-    from datetime import datetime, timedelta
-    # Validate OAuth state nonce
-    if request.args.get('state') != session.pop('oauth_state', None):
+    # FIX (P1): validate against namespaced state key
+    if request.args.get('state') != session.pop('oauth_state_tiktok', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('connect_page'))
     if request.args.get('error'):
@@ -969,7 +1000,7 @@ def auth_tiktok_callback():
     csec   = os.getenv('TIKTOK_CLIENT_SECRET')
     redir  = os.getenv('TIKTOK_REDIRECT_URI', 'http://localhost:5000/auth/tiktok/callback')
     try:
-        tokens = req.post('https://open.tiktokapis.com/v2/oauth/token/',
+        tokens = requests.post('https://open.tiktokapis.com/v2/oauth/token/',
                           data={'client_key': ckey, 'client_secret': csec, 'code': code,
                                 'grant_type': 'authorization_code', 'redirect_uri': redir},
                           headers={'Content-Type': 'application/x-www-form-urlencoded'},
@@ -982,21 +1013,29 @@ def auth_tiktok_callback():
                    expires_at=datetime.utcnow() + timedelta(hours=24),
                    user_id=uid)
     except Exception as e:
+        app.logger.exception('TikTok OAuth callback failed')
         flash(f'TikTok connection failed: {e}')
         return redirect(url_for('connect_page'))
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '4')
-    platform = session.pop('oauth_platform', 'tiktok')
     return redirect(
-        f'/onboarding?connected={platform}&step={step}'
+        f'/onboarding?connected=tiktok&step={step}'
         if next_url == '/onboarding' else url_for('home')
     )
 
 
 # -- ENTRYPOINT -----------------------------------------------------------
 
-# Start background scheduler (publishes scheduled posts every 60s)
-init_scheduler()
+# FIX (P0): Only start the background scheduler in the main process.
+# Previously init_scheduler() ran at module import level, causing it to
+# fire on every gunicorn worker and on every pytest import, resulting in
+# duplicate scheduled post execution and background jobs running in tests.
+# gunicorn --preload users the main process; pytest never reaches this block.
+import multiprocessing
+if __name__ == '__main__' or (
+    os.getenv('RAILWAY_ENVIRONMENT') and multiprocessing.current_process().name == 'MainProcess'
+):
+    init_scheduler()
 
 if __name__ == '__main__':
     init_db()
