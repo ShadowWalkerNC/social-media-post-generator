@@ -1,7 +1,8 @@
 # Post-Audit Manual TODO
 
-These 3 steps were identified during the production-readiness audit (2026-06-21)
-and **cannot be automated via code** — they require action in Railway and GitHub.
+These steps were identified during the production-readiness audit (2026-06-21).
+Code-level fixes have been applied automatically. The items below require
+manual action in Railway and GitHub.
 
 ---
 
@@ -26,51 +27,13 @@ and **cannot be automated via code** — they require action in Railway and GitH
 
 ---
 
-## 3. Wire scheduler + plan guard into app.py
+## 3. Provision Redis on Railway (required for production rate limiting)
 
-### Scheduler (makes scheduled posts actually publish)
-Add near the bottom of `app.py`, just before `if __name__ == '__main__':`:
-```python
-from modules.scheduler_worker import init_scheduler
-init_scheduler()
-```
-
-### Plan guard (enforce subscription tier server-side)
-Add the import at the top of `app.py`:
-```python
-from modules.plan_guard import require_plan, check_platform_limit
-```
-
-Then decorate premium routes:
-```python
-@app.route('/api/push_all', methods=['POST'])
-@login_required
-@require_plan('starter')   # blocks free users
-def api_push_all():
-    ...
-
-@app.route('/api/analytics', methods=['POST'])
-@login_required
-@require_plan('pro')       # blocks free + starter users
-def api_analytics():
-    ...
-
-@app.route('/api/generate_weekly', methods=['POST'])
-@login_required
-@require_plan('starter')
-def api_generate_weekly():
-    ...
-```
-
-Also add platform limit check inside `api_push_all`:
-```python
-from modules.plan_guard import check_platform_limit
-
-platforms = request.json.get('platforms', [])
-allowed, limit = check_platform_limit(current_user.subscription_tier, platforms)
-if not allowed:
-    return jsonify({'success': False, 'error': f'Your plan allows up to {limit} platform(s) at once. Upgrade at /billing.'}), 403
-```
+- In Railway project dashboard → **+ New** → **Database → Redis**
+- Railway auto-sets `REDIS_URL` in your environment
+- Flask-Limiter will automatically use it (already configured in `app.py`)
+- **Why:** Without Redis, each gunicorn worker has its own rate-limit counter.
+  A user effectively gets `5 × N` login attempts where N = worker count.
 
 ---
 
@@ -78,5 +41,14 @@ if not allowed:
 
 - [ ] Railway PostgreSQL provisioned
 - [ ] GitHub secret `CI_TOKEN_ENCRYPTION_KEY` added
-- [ ] `init_scheduler()` wired into `app.py`
-- [ ] `@require_plan` applied to all premium routes in `app.py`
+- [ ] Redis provisioned on Railway
+- [x] `init_scheduler()` guarded to main process only (code fix applied)
+- [x] `@require_plan` applied to all premium routes (code fix applied)
+- [x] `check_platform_limit` enforced on both `/api/push_all` and `/api/publish` (code fix applied)
+- [x] XSS in fallback site renderer fixed (code fix applied)
+- [x] OAuth state keys namespaced per-platform (code fix applied)
+- [x] `?limit=abc` ValueError fixed in `api_post_history` (code fix applied)
+- [x] Silent exception swallowing now logs via `app.logger.exception()` (code fix applied)
+- [x] `import requests` moved to top-level (code fix applied)
+- [x] `WTF_CSRF_TIME_LIMIT` raised to 7200 (code fix applied)
+- [x] `REDIS_URL` and `APP_ENV` added to `.env.example` (code fix applied)
