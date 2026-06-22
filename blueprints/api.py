@@ -16,13 +16,14 @@ from modules.publisher         import UniversalPublisher
 from modules.user_manager      import UserManager
 from modules.auth_manager      import save_token
 from modules.plan_guard        import require_plan, check_platform_limit
+from modules.validator         import validate_post_input
 from blueprints.utils          import _uid, _get_tokens
 
 api_bp = Blueprint('api', __name__)
 
 
 # ---------------------------------------------------------------------------
-# Internal helper
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _enforce_platform_limit(tier, platforms):
@@ -38,6 +39,21 @@ def _enforce_platform_limit(tier, platforms):
     return True, None
 
 
+def _validate_or_400(data: dict):
+    """Run validate_post_input() and return a 400 response tuple if invalid, else None."""
+    ok, errors = validate_post_input(
+        caption      = data.get('caption', ''),
+        content_type = data.get('content_type', 'text'),
+        platforms    = data.get('platforms'),
+        image_url    = data.get('image_url'),
+        video_url    = data.get('video_url'),
+        link_url     = data.get('link_url'),
+    )
+    if not ok:
+        return jsonify({'success': False, 'errors': errors}), 400
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Publish
 # ---------------------------------------------------------------------------
@@ -46,12 +62,19 @@ def _enforce_platform_limit(tier, platforms):
 @login_required
 @require_plan('starter')
 def api_push_all():
-    data      = request.json or {}
-    uid       = _uid()
-    platforms = data.get('platforms') or []
-    ok, err   = _enforce_platform_limit(current_user.subscription_tier, platforms)
-    if not ok:
+    data = request.json or {}
+    uid  = _uid()
+
+    # Validate input before touching any external API
+    err = _validate_or_400(data)
+    if err:
         return err
+
+    platforms = data.get('platforms') or []
+    ok, limit_err = _enforce_platform_limit(current_user.subscription_tier, platforms)
+    if not ok:
+        return limit_err
+
     tokens    = _get_tokens(uid)
     publisher = UniversalPublisher(tokens, user_id=uid)
     results   = publisher.push_all(
@@ -83,12 +106,19 @@ def api_push_all():
 @login_required
 @require_plan('starter')
 def api_publish():
-    data      = request.json or {}
-    uid       = _uid()
-    platforms = data.get('platforms') or []
-    ok, err   = _enforce_platform_limit(current_user.subscription_tier, platforms)
-    if not ok:
+    data = request.json or {}
+    uid  = _uid()
+
+    # Validate input before touching any external API
+    err = _validate_or_400(data)
+    if err:
         return err
+
+    platforms = data.get('platforms') or []
+    ok, limit_err = _enforce_platform_limit(current_user.subscription_tier, platforms)
+    if not ok:
+        return limit_err
+
     tokens    = _get_tokens(uid)
     publisher = UniversalPublisher(tokens, user_id=uid)
     results   = publisher.push_all(
