@@ -1,8 +1,19 @@
 """
-auth_manager.py -- Token Persistence, Refresh & Expiry
+modules/auth_manager.py
 
-Handles Fernet-encrypted token storage via modules.db (SQLite dev / PostgreSQL prod).
-Auto-refreshes Google and TikTok tokens.
+╔══════════════════════════════════════════════════════════════════════════╗
+║  AUTHORITATIVE TOKEN STORE                                               ║
+║  All OAuth access/refresh tokens are stored in the `platform_tokens`    ║
+║  table managed by this module.  There is NO second copy anywhere else.  ║
+║                                                                          ║
+║  Write tokens:  save_token(platform, access_token, ..., user_id=uid)    ║
+║  Read tokens:   load_token(platform, user_id)  -> dict | None           ║
+║  Delete tokens: delete_token(platform, user_id)                         ║
+║  Token refresh: get_valid_google_token(uid) / refresh_tiktok_token(uid) ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Tokens are Fernet-encrypted at rest using TOKEN_ENCRYPTION_KEY.
+Storage backend: SQLite (dev) or PostgreSQL (prod) via modules/db.py.
 """
 
 import os
@@ -79,6 +90,10 @@ def _decrypt(value: str) -> str:
 # ---------------------------------------------------------------------------
 def save_token(platform: str, access_token: str, refresh_token: str = None,
                expires_at: datetime = None, meta: dict = None, user_id: str = 'default'):
+    """
+    Upsert an OAuth token for (user_id, platform).
+    Tokens are Fernet-encrypted before storage.
+    """
     enc_access  = _encrypt(access_token)
     enc_refresh = _encrypt(refresh_token) if refresh_token else None
     expires_str = expires_at.isoformat() if expires_at else None
@@ -131,6 +146,10 @@ def save_token(platform: str, access_token: str, refresh_token: str = None,
 # Load token
 # ---------------------------------------------------------------------------
 def load_token(platform: str, user_id: str = 'default') -> dict | None:
+    """
+    Return decrypted token dict for (user_id, platform), or None if not found.
+    Dict keys: access_token, refresh_token, expires_at, meta.
+    """
     p   = placeholder
     sql = (
         f'SELECT access_token, refresh_token, expires_at, token_meta '
@@ -152,10 +171,7 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
         return None
 
     if isinstance(row, dict):
-        a = row['access_token']
-        r = row['refresh_token']
-        e = row['expires_at']
-        m = row['token_meta']
+        a, r, e, m = row['access_token'], row['refresh_token'], row['expires_at'], row['token_meta']
     else:
         a, r, e, m = row[0], row[1], row[2], row[3]
 
@@ -171,6 +187,7 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
 # Expiry checks
 # ---------------------------------------------------------------------------
 def is_token_expired(platform: str, user_id: str = 'default', warn_days: int = 7) -> str:
+    """Returns 'ok' | 'warning' | 'expired' | 'missing'."""
     token = load_token(platform, user_id)
     if not token:
         return 'missing'
@@ -217,6 +234,7 @@ def refresh_google_token(user_id: str = 'default') -> str | None:
 
 
 def get_valid_google_token(user_id: str = 'default') -> str | None:
+    """Return a valid (auto-refreshed if needed) Google token, or None."""
     status = is_token_expired('google', user_id, warn_days=0)
     if status == 'expired':
         return refresh_google_token(user_id)

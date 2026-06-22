@@ -11,6 +11,12 @@ All routes live in blueprints/:
   pages.py    -- dashboard, setup, calendar, onboarding, legal
 
 Shared helpers (uid, token loading, business name) live in blueprints/utils.py.
+
+Token storage note:
+  OAuth tokens are stored EXCLUSIVELY in the `platform_tokens` table owned
+  by modules/auth_manager.py (Fernet-encrypted).  There is NO second copy
+  anywhere in the `users` table.  See auth_manager.save_token() /
+  auth_manager.load_token() for the API.
 """
 
 import os
@@ -127,11 +133,12 @@ def init_db():
                 subscription_tier  TEXT DEFAULT 'free',
                 stripe_customer_id TEXT,
                 created_at         INTEGER,
-                last_login_at      INTEGER,
-                business_profile   TEXT,
-                platform_tokens    TEXT
+                last_login_at      INTEGER
             );
         ''')
+        -- NOTE: OAuth tokens live in `platform_tokens` (auth_manager.py).
+        -- Business profile lives in `business_profiles` (user_manager.py).
+        -- Do NOT add platform_tokens TEXT or business_profile TEXT here.
         db.commit()
         db.close()
         print('DB initialised')

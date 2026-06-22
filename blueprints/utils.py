@@ -2,6 +2,11 @@
 blueprints/utils.py
 Shared helpers used across multiple blueprints.
 Import from here rather than duplicating in each blueprint.
+
+Token storage note:
+  All OAuth tokens are read/written EXCLUSIVELY via modules.auth_manager
+  (save_token / load_token / delete_token).  _get_tokens() below is a
+  read-only convenience wrapper -- do not call save_token anywhere else.
 """
 
 import json
@@ -20,6 +25,10 @@ def _uid() -> str:
 
 
 def _get_tokens(uid: str = None) -> dict:
+    """
+    Load all OAuth tokens for uid from the platform_tokens table.
+    Single source of truth: delegates entirely to auth_manager.load_token().
+    """
     uid = uid or _uid()
     tokens = {}
     platform_map = {
