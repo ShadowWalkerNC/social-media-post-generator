@@ -136,8 +136,8 @@ def init_db():
                 last_login_at      INTEGER
             );
         ''')
-        # NOTE: OAuth tokens live in `platform_tokens` (auth_manager.py).
-        # Business profile lives in `business_profiles` (user_manager.py).
+        # OAuth tokens live in platform_tokens (auth_manager.py).
+        # Business profile lives in business_profiles (user_manager.py).
         # Do NOT add platform_tokens TEXT or business_profile TEXT here.
         db.commit()
         db.close()
