@@ -102,6 +102,15 @@ def auth_disconnect(pid):
 # ---------------------------------------------------------------------------
 # OAuth: Facebook
 # ---------------------------------------------------------------------------
+# Scopes:
+#   pages_show_list              -- let user pick which Page to connect
+#   pages_read_engagement        -- read Page likes, comments, shares
+#   pages_manage_posts           -- publish to the Page
+#   instagram_basic              -- read IG account info + follower count
+#   instagram_content_publish    -- publish to IG
+#   instagram_manage_insights    -- read IG reach, impressions, profile views
+#                                   (requires App Review for non-admin users)
+# ---------------------------------------------------------------------------
 
 @auth_bp.route('/auth/facebook')
 @login_required
@@ -112,7 +121,14 @@ def auth_facebook():
     session['oauth_step']           = request.args.get('step', '2')
     app_id       = os.getenv('FACEBOOK_APP_ID')
     redirect_uri = os.getenv('REDIRECT_URI', 'http://localhost:5000/auth/facebook/callback')
-    scopes = 'pages_manage_posts,pages_read_engagement,instagram_content_publish,instagram_basic'
+    scopes = (
+        'pages_show_list,'
+        'pages_read_engagement,'
+        'pages_manage_posts,'
+        'instagram_basic,'
+        'instagram_content_publish,'
+        'instagram_manage_insights'
+    )
     return redirect(
         f'https://www.facebook.com/v19.0/dialog/oauth'
         f'?client_id={app_id}&redirect_uri={redirect_uri}&scope={scopes}&state={state}'
@@ -303,7 +319,7 @@ def auth_tiktok_callback():
 
 def _twitter_pkce_pair():
     """Return (code_verifier, code_challenge) for S256 PKCE."""
-    verifier  = secrets.token_urlsafe(64)          # 86 URL-safe chars
+    verifier  = secrets.token_urlsafe(64)
     digest    = hashlib.sha256(verifier.encode()).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode()
     return verifier, challenge
@@ -312,12 +328,12 @@ def _twitter_pkce_pair():
 @auth_bp.route('/auth/twitter')
 @login_required
 def auth_twitter():
-    state                           = secrets.token_urlsafe(32)
-    verifier, challenge             = _twitter_pkce_pair()
-    session['oauth_state_twitter']  = state
+    state                            = secrets.token_urlsafe(32)
+    verifier, challenge              = _twitter_pkce_pair()
+    session['oauth_state_twitter']   = state
     session['twitter_code_verifier'] = verifier
-    session['oauth_next']           = request.args.get('next', '/')
-    session['oauth_step']           = request.args.get('step', '5')
+    session['oauth_next']            = request.args.get('next', '/')
+    session['oauth_step']            = request.args.get('step', '5')
     client_id = os.getenv('TWITTER_CLIENT_ID')
     redir     = os.getenv('TWITTER_REDIRECT_URI', 'http://localhost:5000/auth/twitter/callback')
     scopes    = 'tweet.read%20tweet.write%20users.read%20offline.access'
@@ -352,10 +368,10 @@ def auth_twitter_callback():
         token_resp = requests.post(
             'https://api.twitter.com/2/oauth2/token',
             data={
-                'code':           code,
-                'grant_type':     'authorization_code',
-                'redirect_uri':   redir,
-                'code_verifier':  verifier,
+                'code':          code,
+                'grant_type':    'authorization_code',
+                'redirect_uri':  redir,
+                'code_verifier': verifier,
             },
             auth=(cid, csec),
             headers={'Content-Type': 'application/x-www-form-urlencoded'},
@@ -365,7 +381,6 @@ def auth_twitter_callback():
         refresh_token = token_resp.get('refresh_token')
         expires_in    = token_resp.get('expires_in', 7200)
 
-        # Fetch authenticated user info
         me = requests.get(
             'https://api.twitter.com/2/users/me',
             headers={'Authorization': f'Bearer {access_token}'},
