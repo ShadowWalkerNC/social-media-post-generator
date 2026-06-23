@@ -20,7 +20,13 @@ def index():
 @pages_bp.route('/dashboard')
 @login_required
 def home():
-    return render_template('dashboard.html')
+    return render_template('dashboard.html', is_demo=False)
+
+
+@pages_bp.route('/demo')
+@pages_bp.route('/ondemo')
+def demo_dashboard():
+    return render_template('dashboard.html', is_demo=True, business_name="Flavor Junction (Demo)", tier_label="Starter Plan")
 
 
 @pages_bp.route('/setup')
