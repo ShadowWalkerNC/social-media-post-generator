@@ -14,7 +14,14 @@ pages_bp = Blueprint('pages', __name__)
 def index():
     if current_user.is_authenticated:
         return redirect(url_for('pages.home'))
-    return render_template('index.html', site={})
+    site = {
+        'name': 'Post-Pilot',
+        'description': 'AI-powered social media automation for food businesses.',
+        'url': '',
+        'logo': '',
+        'primary_color': '#6366f1',
+    }
+    return render_template('index.html', site=site)
 
 
 @pages_bp.route('/dashboard')
