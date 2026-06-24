@@ -1,7 +1,13 @@
 """
 blueprints/auth.py
-Authentication routes: login, register, logout.
+Authentication routes: magic link (Supabase Auth), logout.
 OAuth flows: Facebook, Google, TikTok, Twitter/X.
+
+Flow:
+  1. User enters email on /register or /login
+  2. We call supabase.auth.sign_in_with_otp() — Supabase emails them a magic link
+  3. Supabase redirects to /auth/confirm?token_hash=...&type=magiclink
+  4. We exchange the token, create/sync pp.users row, log in via Flask-Login
 """
 
 import base64
@@ -13,7 +19,7 @@ from datetime import datetime, timedelta
 
 from flask import (
     Blueprint, render_template, request, redirect,
-    url_for, session, flash, jsonify
+    url_for, session, flash, jsonify, current_app
 )
 from flask_login import login_user, logout_user, login_required, current_user
 
@@ -23,9 +29,34 @@ from blueprints.utils      import _uid
 
 auth_bp = Blueprint('auth', __name__)
 
+APP_URL = os.getenv('APP_URL', 'https://post-pilot-opal.vercel.app')
+
 
 # ---------------------------------------------------------------------------
-# Register / Login / Logout
+# Magic Link helpers
+# ---------------------------------------------------------------------------
+
+def _get_supabase():
+    """Return the supabase client initialised in app.py."""
+    return current_app.extensions['supabase']
+
+
+def _send_magic_link(email: str, redirect_to: str = None) -> bool:
+    """Send a Supabase magic-link OTP. Returns True on success."""
+    sb = _get_supabase()
+    opts = {}
+    if redirect_to:
+        opts['email_redirect_to'] = redirect_to
+    try:
+        sb.auth.sign_in_with_otp({'email': email, 'options': opts})
+        return True
+    except Exception as exc:
+        current_app.logger.error('magic link send failed for %s: %s', email, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Register
 # ---------------------------------------------------------------------------
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
@@ -34,43 +65,102 @@ def register():
     if current_user.is_authenticated:
         return redirect(url_for('pages.home'))
     if request.method == 'POST':
-        email        = request.form.get('email', '').strip()
-        password     = request.form.get('password', '')
+        email        = request.form.get('email', '').strip().lower()
         display_name = request.form.get('display_name', '').strip()
-        if not email or not password:
-            flash('Email and password are required.')
+        if not email:
+            flash('Email is required.')
             return render_template('register.html', plan=plan)
-        if len(password) < 8:
-            flash('Password must be at least 8 characters.')
-            return render_template('register.html', plan=plan)
-        user = UserManager.create_user(email, password, full_name=display_name)
-        if not user:
-            flash('An account with that email already exists.')
-            return render_template('register.html', plan=plan)
-        login_user(user, remember=True)
-        UserManager.touch_login(user.id)
-        if plan and plan != 'free':
-            return redirect(url_for('billing.billing_checkout', plan=plan))
-        return redirect(url_for('pages.onboarding'))
+        # Store name + plan in session so we can use them after confirm
+        session['pending_display_name'] = display_name
+        session['pending_plan']         = plan
+        confirm_url = f"{APP_URL}/auth/confirm"
+        if _send_magic_link(email, redirect_to=confirm_url):
+            flash('Check your email for a magic sign-in link!', 'success')
+            return render_template('magic_link_sent.html', email=email)
+        flash('Could not send magic link. Please try again.')
     return render_template('register.html', plan=plan)
 
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('pages.home'))
     if request.method == 'POST':
-        email    = request.form.get('email', '').strip()
-        password = request.form.get('password', '')
-        user     = UserManager.get_user_by_email(email)
-        if not user or not UserManager.verify_password(user, password):
-            flash('Invalid email or password.')
+        email = request.form.get('email', '').strip().lower()
+        if not email:
+            flash('Email is required.')
             return render_template('login.html')
-        login_user(user, remember=True)
-        UserManager.touch_login(user.id)
-        return redirect(request.args.get('next') or url_for('pages.home'))
+        confirm_url = f"{APP_URL}/auth/confirm"
+        if _send_magic_link(email, redirect_to=confirm_url):
+            flash('Check your email for a magic sign-in link!', 'success')
+            return render_template('magic_link_sent.html', email=email)
+        flash('Could not send magic link. Please try again.')
     return render_template('login.html')
 
+
+# ---------------------------------------------------------------------------
+# Magic Link Confirm  (Supabase redirects here after user clicks email link)
+# ---------------------------------------------------------------------------
+
+@auth_bp.route('/auth/confirm')
+def auth_confirm():
+    """
+    Supabase redirects here with ?token_hash=...&type=magiclink
+    We exchange it for a session, sync pp.users, then log in.
+    """
+    token_hash = request.args.get('token_hash')
+    link_type  = request.args.get('type', 'magiclink')
+
+    if not token_hash:
+        flash('Invalid or expired magic link.')
+        return redirect(url_for('auth.login'))
+
+    sb = _get_supabase()
+    try:
+        result  = sb.auth.verify_otp({'token_hash': token_hash, 'type': link_type})
+        sb_user = result.user
+    except Exception as exc:
+        current_app.logger.error('OTP verify failed: %s', exc)
+        flash('Magic link expired or already used. Request a new one.')
+        return redirect(url_for('auth.login'))
+
+    if not sb_user:
+        flash('Could not verify magic link. Please try again.')
+        return redirect(url_for('auth.login'))
+
+    email        = sb_user.email
+    uid          = str(sb_user.id)   # auth.users uuid
+    display_name = session.pop('pending_display_name', '')
+    plan         = session.pop('pending_plan', 'free')
+
+    # Sync into pp.users (upsert — works for both new and returning users)
+    user = UserManager.get_user(uid)
+    if not user:
+        user = UserManager.upsert_user(uid, email, full_name=display_name, plan=plan)
+
+    if not user:
+        flash('Account setup failed. Please contact support.')
+        return redirect(url_for('auth.login'))
+
+    login_user(user, remember=True)
+    UserManager.touch_login(uid)
+
+    next_url = request.args.get('next') or session.pop('oauth_next', None)
+    if plan and plan not in ('', 'free'):
+        return redirect(url_for('billing.billing_checkout', plan=plan))
+    if next_url:
+        return redirect(next_url)
+    # New user (no existing dashboard data) → onboarding; returning → home
+    return redirect(url_for('pages.onboarding') if display_name else url_for('pages.home'))
+
+
+# ---------------------------------------------------------------------------
+# Logout
+# ---------------------------------------------------------------------------
 
 @auth_bp.route('/logout')
 @login_required
@@ -79,6 +169,10 @@ def logout():
     flash('You have been signed out.', 'success')
     return redirect(url_for('pages.index'))
 
+
+# ---------------------------------------------------------------------------
+# Platform disconnect
+# ---------------------------------------------------------------------------
 
 @auth_bp.route('/auth/disconnect/<pid>', methods=['POST'])
 @login_required
@@ -129,7 +223,6 @@ def auth_facebook():
 @auth_bp.route('/auth/facebook/callback')
 @login_required
 def auth_facebook_callback():
-    from flask import current_app
     if request.args.get('state') != session.pop('oauth_state_facebook', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('pages.connect_page'))
@@ -195,7 +288,6 @@ def auth_google():
 @auth_bp.route('/auth/google/callback')
 @login_required
 def auth_google_callback():
-    from flask import current_app
     if request.args.get('state') != session.pop('oauth_state_google', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('pages.connect_page'))
@@ -265,7 +357,6 @@ def auth_tiktok():
 @auth_bp.route('/auth/tiktok/callback')
 @login_required
 def auth_tiktok_callback():
-    from flask import current_app
     if request.args.get('state') != session.pop('oauth_state_tiktok', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('pages.connect_page'))
@@ -304,7 +395,6 @@ def auth_tiktok_callback():
 # ---------------------------------------------------------------------------
 
 def _twitter_pkce_pair():
-    """Return (code_verifier, code_challenge) for S256 PKCE."""
     verifier  = secrets.token_urlsafe(64)
     digest    = hashlib.sha256(verifier.encode()).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b'=').decode()
@@ -328,7 +418,6 @@ def auth_twitter():
         f'?response_type=code'
         f'&client_id={client_id}'
         f'&redirect_uri={redir}'
-        f'&response_type=code&scope={scope}&access_type=offline&state={state}'
         f'&scope={scopes}'
         f'&state={state}'
         f'&code_challenge={challenge}'
@@ -339,7 +428,6 @@ def auth_twitter():
 @auth_bp.route('/auth/twitter/callback')
 @login_required
 def auth_twitter_callback():
-    from flask import current_app
     if request.args.get('state') != session.pop('oauth_state_twitter', None):
         flash('OAuth state mismatch. Please try connecting again.')
         return redirect(url_for('pages.connect_page'))
@@ -367,16 +455,13 @@ def auth_twitter_callback():
         access_token  = token_resp.get('access_token')
         refresh_token = token_resp.get('refresh_token')
         expires_in    = token_resp.get('expires_in', 7200)
-
         me = requests.get(
             'https://api.twitter.com/2/users/me',
             headers={'Authorization': f'Bearer {access_token}'},
             timeout=10,
         ).json().get('data', {})
-
         save_token(
-            'twitter',
-            access_token,
+            'twitter', access_token,
             refresh_token=refresh_token,
             expires_at=datetime.utcnow() + timedelta(seconds=expires_in),
             meta={'user_id': me.get('id'), 'username': me.get('username')},
@@ -386,7 +471,6 @@ def auth_twitter_callback():
         current_app.logger.exception('Twitter OAuth callback failed')
         flash('Twitter / X connection failed. Please try again.')
         return redirect(url_for('pages.connect_page'))
-
     next_url = session.pop('oauth_next', '/')
     step     = session.pop('oauth_step', '5')
     return redirect(

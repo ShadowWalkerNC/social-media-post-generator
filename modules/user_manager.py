@@ -1,16 +1,14 @@
 """
 user_manager.py — User accounts for Post-Pilot (pp schema on Supabase).
 
+Auth is now handled entirely by Supabase Auth (magic links).
+This module only syncs/reads the pp.users mirror table.
+
 All queries use `?` placeholders; db.py's DBConnectionWrapper auto-converts
-them to `%s` for PostgreSQL.  search_path=pp is set on every connection so
-bare table names resolve correctly.
+them to %s for PostgreSQL. ::uuid casts are applied wherever a uuid column
+is compared to a text parameter.
 
-Key fix: Supabase stores id/user_id as uuid type. Passing a plain Python
-string via psycopg2 sends it as `text`, causing:
-  "operator does not exist: uuid = text"
-Fix: cast every uuid parameter with ::uuid in the SQL.
-
-Live pp schema columns used:
+Live pp schema columns:
   users:        id, email, password_hash, full_name, business_name, plan,
                 stripe_customer_id, stripe_sub_id, is_active, is_verified,
                 reset_token, reset_token_expiry, created_at, updated_at
@@ -26,7 +24,6 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from werkzeug.security import check_password_hash, generate_password_hash
 from flask_login import UserMixin
 
 from modules.database import get_db
@@ -43,21 +40,20 @@ class User(UserMixin):
     def __init__(self, row: dict):
         self.id                 = str(row['id'])
         self.email              = row['email']
-        self.password_hash      = row['password_hash']
+        self.password_hash      = row.get('password_hash') or ''
         self.full_name          = row.get('full_name') or ''
         self.business_name      = row.get('business_name') or ''
         self.plan               = row.get('plan', 'free')
         self.stripe_customer_id = row.get('stripe_customer_id')
         self.stripe_sub_id      = row.get('stripe_sub_id')
         self.is_active          = bool(row.get('is_active', True))
-        self.is_verified        = bool(row.get('is_verified', False))
+        self.is_verified        = bool(row.get('is_verified', True))  # magic link = verified
         self.created_at         = row.get('created_at', '')
         self.updated_at         = row.get('updated_at', '')
 
     def get_id(self) -> str:
         return self.id
 
-    # Aliases so existing templates / blueprints keep working
     @property
     def display_name(self) -> str:
         return self.full_name or self.business_name or self.email.split('@')[0]
@@ -99,34 +95,36 @@ def _get_conn():
 # ---------------------------------------------------------------------------
 class UserManager:
 
-    # -- Create -------------------------------------------------------------
+    # -- Upsert (called after successful magic link confirm) -----------------
     @staticmethod
-    def create_user(
+    def upsert_user(
+        user_id: str,
         email: str,
-        password: str,
         full_name: str = '',
         business_name: str = '',
         plan: str = 'free',
     ) -> Optional[User]:
-        """Register a new user. Returns User on success, None if email taken."""
-        email = email.strip().lower()
+        """
+        Insert a new user row or return existing. Called after Supabase OTP verify.
+        The id comes directly from supabase auth.users so it is already a valid UUID.
+        """
         try:
-            conn  = _get_conn()
-            uid   = str(uuid.uuid4())
-            phash = generate_password_hash(password)
+            conn = _get_conn()
             conn.execute(
                 '''
-                INSERT INTO users
-                    (id, email, password_hash, full_name, business_name, plan)
-                VALUES (?::uuid, ?, ?, ?, ?, ?)
+                INSERT INTO users (id, email, full_name, business_name, plan, is_verified)
+                VALUES (?::uuid, ?, ?, ?, ?, TRUE)
+                ON CONFLICT (id) DO UPDATE SET
+                    email         = EXCLUDED.email,
+                    updated_at    = NOW()
                 ''',
-                (uid, email, phash, full_name, business_name, plan),
+                (str(user_id), email.strip().lower(), full_name, business_name, plan),
             )
             conn.commit()
-            logger.info('User created: %s [%s]', email, uid)
-            return UserManager.get_user(uid)
+            logger.info('User upserted: %s [%s]', email, user_id)
+            return UserManager.get_user(user_id)
         except Exception as exc:
-            logger.warning('create_user failed for %s: %s', email, exc)
+            logger.error('upsert_user failed for %s: %s', email, exc)
             return None
 
     # -- Read ---------------------------------------------------------------
@@ -161,13 +159,8 @@ class UserManager:
             return None
 
     @staticmethod
-    def verify_password(user: User, password: str) -> bool:
-        """Returns True if password matches stored hash."""
-        return check_password_hash(user.password_hash, password)
-
-    @staticmethod
     def touch_login(user_id: str):
-        """Bump updated_at on successful login. Non-fatal — never raises."""
+        """Bump updated_at on successful login. Non-fatal."""
         try:
             conn = _get_conn()
             conn.execute(
@@ -181,7 +174,6 @@ class UserManager:
     # -- Update -------------------------------------------------------------
     @staticmethod
     def update_profile(user_id: str, full_name: str = None, business_name: str = None):
-        """Update full_name / business_name."""
         fields, values = [], []
         if full_name is not None:
             fields.append('full_name = ?')
@@ -206,7 +198,6 @@ class UserManager:
         stripe_customer_id: str = None,
         stripe_sub_id: str = None,
     ):
-        """Update plan and Stripe metadata. Called by billing_manager on webhooks."""
         conn = _get_conn()
         conn.execute(
             '''
@@ -222,65 +213,13 @@ class UserManager:
         conn.commit()
         logger.info('Subscription updated: user=%s plan=%s', user_id, plan)
 
-    # -- Password reset -----------------------------------------------------
-    @staticmethod
-    def set_reset_token(email: str) -> Optional[str]:
-        """Generate + store a password-reset token. Returns raw token or None."""
-        user = UserManager.get_user_by_email(email)
-        if not user:
-            return None
-        token  = secrets.token_urlsafe(32)
-        expiry = datetime.utcnow() + timedelta(hours=2)
-        conn   = _get_conn()
-        conn.execute(
-            'UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE id = ?::uuid',
-            (token, expiry, str(user.id)),
-        )
-        conn.commit()
-        return token
-
-    @staticmethod
-    def reset_password(token: str, new_password: str) -> bool:
-        """Consume reset token and update password. Returns True on success."""
-        conn = _get_conn()
-        cur  = conn.execute(
-            'SELECT id, reset_token_expiry FROM users WHERE reset_token = ?',
-            (token,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return False
-        row    = dict(row)
-        expiry = row.get('reset_token_expiry')
-        if expiry:
-            if hasattr(expiry, 'tzinfo') and expiry.tzinfo:
-                expiry = expiry.replace(tzinfo=None)
-            if datetime.utcnow() > expiry:
-                return False
-        phash = generate_password_hash(new_password)
-        conn.execute(
-            '''
-            UPDATE users
-            SET password_hash = ?, reset_token = NULL, reset_token_expiry = NULL
-            WHERE id = ?::uuid
-            ''',
-            (phash, str(row['id'])),
-        )
-        conn.commit()
-        return True
-
-    # -- Post history (pp.post_queue) ---------------------------------------
+    # -- Post history -------------------------------------------------------
     @staticmethod
     def log_post(
-        user_id:          str,
-        content:          str,
-        platform:         str,
-        status:           str = 'published',
-        scheduled_at      = None,
-        media_urls:       list = None,
-        platform_post_id: str = None,
+        user_id: str, content: str, platform: str,
+        status: str = 'published', scheduled_at=None,
+        media_urls: list = None, platform_post_id: str = None,
     ) -> str:
-        """Save a post to pp.post_queue. Returns the new row id."""
         import json
         conn   = _get_conn()
         row_id = str(uuid.uuid4())
@@ -291,37 +230,29 @@ class UserManager:
                  scheduled_at, platform_post_id)
             VALUES (?::uuid, ?::uuid, ?, ?, ?, ?, ?, ?)
             ''',
-            (
-                row_id, str(user_id), platform, content,
-                json.dumps(media_urls or []),
-                status, scheduled_at, platform_post_id,
-            ),
+            (row_id, str(user_id), platform, content,
+             json.dumps(media_urls or []), status, scheduled_at, platform_post_id),
         )
         conn.commit()
         return row_id
 
     @staticmethod
     def get_post_history(
-        user_id: str,
-        limit:   int = 50,
-        offset:  int = 0,
-        status:  str = None,
+        user_id: str, limit: int = 50, offset: int = 0, status: str = None,
     ) -> list:
-        """Fetch post history from pp.post_queue, newest first."""
         import json
         conn   = _get_conn()
         where  = 'WHERE user_id = ?::uuid'
         params = [str(user_id)]
         if status:
-            where  += ' AND status = ?'
+            where += ' AND status = ?'
             params.append(status)
         cur  = conn.execute(
             f'SELECT * FROM post_queue {where} ORDER BY created_at DESC LIMIT ? OFFSET ?',
             params + [limit, offset],
         )
-        rows   = cur.fetchall()
         result = []
-        for row in rows:
+        for row in cur.fetchall():
             d = dict(row)
             if d.get('media_urls') and isinstance(d['media_urls'], str):
                 try:
@@ -331,10 +262,9 @@ class UserManager:
             result.append(d)
         return result
 
-    # -- API Keys (pp.api_keys) --------------------------------------------
+    # -- API Keys -----------------------------------------------------------
     @staticmethod
     def create_api_key(user_id: str, label: str = 'Default key') -> str:
-        """Generate a new API key. Returns raw key (shown once, never stored)."""
         raw_key  = 'pp_live_' + secrets.token_hex(32)
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         conn     = _get_conn()
@@ -348,7 +278,6 @@ class UserManager:
 
     @staticmethod
     def lookup_api_key(raw_key: str) -> Optional[User]:
-        """Verify a raw API key and return the owning User."""
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         conn     = _get_conn()
         cur      = conn.execute(

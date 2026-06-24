@@ -4,23 +4,23 @@ Post-Pilot -- Smart Social Media Hub
 app.py: application factory, extensions, DB init, error handlers, entrypoint.
 
 All routes live in blueprints/:
-  auth.py     -- login, register, logout, OAuth (FB / Google / TikTok)
+  auth.py     -- magic link auth (Supabase), logout, OAuth (FB/Google/TikTok/Twitter)
   billing.py  -- Stripe checkout, portal, cancel, webhook
   api.py      -- /api/* endpoints
   website.py  -- website hub + public site renderer
   pages.py    -- dashboard, setup, calendar, onboarding, legal
 
-Shared helpers (uid, token loading, business name) live in blueprints/utils.py.
+Auth note:
+  Password auth has been replaced with Supabase magic links.
+  supabase client is stored as app.extensions['supabase'] for use in blueprints.
 
 Token storage note:
   OAuth tokens are stored EXCLUSIVELY in the `platform_tokens` table owned
-  by modules/auth_manager.py (Fernet-encrypted).  There is NO second copy
-  anywhere in the `users` table.  See auth_manager.save_token() /
-  auth_manager.load_token() for the API.
+  by modules/auth_manager.py (Fernet-encrypted). There is NO second copy
+  anywhere in the `users` table.
 """
 
 import os
-import multiprocessing
 from flask import Flask, g, jsonify, redirect, url_for, flash, request
 from flask_login import LoginManager, current_user
 from flask_wtf.csrf import CSRFProtect
@@ -28,8 +28,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_cors import CORS
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import scoped_session, sessionmaker
+from supabase import create_client, Client
 
 from modules.user_manager    import UserManager
 from modules.auth_manager    import init_db as auth_init_db
@@ -39,7 +38,7 @@ from modules.website_manager import WebsiteManager
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Secret key -- hard-fail if missing in production
+# Secret key
 # ---------------------------------------------------------------------------
 _secret = os.getenv('FLASK_SECRET_KEY')
 if not _secret:
@@ -49,26 +48,6 @@ if not _secret:
     _secret = 'dev-only-insecure-key'
 
 # ---------------------------------------------------------------------------
-# Database (PostgreSQL via Supabase)
-# ---------------------------------------------------------------------------
-DATABASE_URL = os.getenv('DATABASE_URL')
-if not DATABASE_URL:
-    raise RuntimeError('DATABASE_URL is not set. Add it to your .env file.')
-
-engine       = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = scoped_session(sessionmaker(bind=engine))
-
-def get_db():
-    db = getattr(g, '_database', None)
-    if db is None:
-        db = g._database = SessionLocal()
-    return db
-
-@property
-def _db_execute(self):
-    return self.execute
-
-# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 app = Flask(__name__)
@@ -76,11 +55,28 @@ app.config['SECRET_KEY']          = _secret
 app.config['WTF_CSRF_TIME_LIMIT'] = 7200
 
 # ---------------------------------------------------------------------------
-# CORS -- allow Cheezies Gourmet frontend
+# Supabase client (used for Auth — magic links)
+# ---------------------------------------------------------------------------
+_sb_url = os.getenv('SUPABASE_URL')
+_sb_key = os.getenv('SUPABASE_ANON_KEY')
+if not _sb_url or not _sb_key:
+    import sys
+    if os.getenv('FLASK_ENV') == 'production' or os.getenv('VERCEL_ENV'):
+        sys.exit('FATAL: SUPABASE_URL and SUPABASE_ANON_KEY must be set.')
+    # Dev fallback — auth routes will fail but app still starts
+    _sb_url = _sb_url or 'https://placeholder.supabase.co'
+    _sb_key = _sb_key or 'placeholder'
+
+supabase: Client = create_client(_sb_url, _sb_key)
+app.extensions['supabase'] = supabase
+
+# ---------------------------------------------------------------------------
+# CORS
 # ---------------------------------------------------------------------------
 CORS(app, origins=[
     'https://cheezies-gourmet.vercel.app',
-    'http://localhost:5173',  # local dev
+    'https://post-pilot-opal.vercel.app',
+    'http://localhost:5173',
     'http://localhost:3000',
 ])
 
@@ -118,10 +114,12 @@ register_blueprints(app, csrf)
 # ---------------------------------------------------------------------------
 @app.teardown_appcontext
 def close_db(exc):
-    db = getattr(g, '_database', None)
+    db = getattr(g, 'db', None)
     if db is not None:
-        db.close()
-    SessionLocal.remove()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # Error handlers
