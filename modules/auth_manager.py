@@ -36,14 +36,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Encryption
 # ---------------------------------------------------------------------------
-ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY')
+ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY', '').strip()
 if not ENCRYPTION_KEY:
     ENCRYPTION_KEY = Fernet.generate_key().decode()
     logger.warning('TOKEN_ENCRYPTION_KEY not set -- generated ephemeral key (dev only)')
 
-fernet = Fernet(
-    ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
-)
+# Ensure it is bytes for Fernet
+_key_bytes = ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
+
+# Validate before constructing so the error message is clear
+try:
+    fernet = Fernet(_key_bytes)
+except Exception as exc:
+    logger.error('Invalid TOKEN_ENCRYPTION_KEY (%s) -- generating ephemeral key', exc)
+    fernet = Fernet(Fernet.generate_key())
 
 
 def _encrypt(payload: dict) -> str:
