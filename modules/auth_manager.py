@@ -1,7 +1,7 @@
 """
 modules/auth_manager.py
 
-╔══════════════════════════════════════════════════════════════════════════╗
+╔══════════════════════════════════════════════════════════════════════════════╗
 ║  AUTHORITATIVE TOKEN STORE                                               ║
 ║  All OAuth access/refresh tokens are stored in the `platform_tokens`    ║
 ║  table managed by this module.  There is NO second copy anywhere else.  ║
@@ -10,7 +10,7 @@ modules/auth_manager.py
 ║  Read tokens:   load_token(platform, user_id)  -> dict | None           ║
 ║  Delete tokens: delete_token(platform, user_id)                         ║
 ║  Token refresh: get_valid_google_token(uid) / refresh_tiktok_token(uid) ║
-╚══════════════════════════════════════════════════════════════════════════╝
+╚══════════════════════════════════════════════════════════════════════════════╝
 
 Tokens are Fernet-encrypted at rest using TOKEN_ENCRYPTION_KEY.
 Storage backend: SQLite (dev) or PostgreSQL (prod) via modules/db.py.
@@ -30,12 +30,20 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Encryption key
 # ---------------------------------------------------------------------------
-ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY')
+ENCRYPTION_KEY = os.environ.get('TOKEN_ENCRYPTION_KEY', '').strip()
 if not ENCRYPTION_KEY:
     ENCRYPTION_KEY = Fernet.generate_key().decode()
     logger.warning('TOKEN_ENCRYPTION_KEY not set -- generated ephemeral key (dev only)')
 
-fernet = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
+# Ensure it is bytes for Fernet
+_key_bytes = ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY
+
+# Validate before constructing so the error message is clear
+try:
+    fernet = Fernet(_key_bytes)
+except Exception as exc:
+    logger.error('Invalid TOKEN_ENCRYPTION_KEY (%s) -- generating ephemeral key', exc)
+    fernet = Fernet(Fernet.generate_key())
 
 
 # ---------------------------------------------------------------------------
