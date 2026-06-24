@@ -43,7 +43,7 @@ def register():
         if len(password) < 8:
             flash('Password must be at least 8 characters.')
             return render_template('register.html', plan=plan)
-        user = UserManager.create_user(email, password, display_name=display_name)
+        user = UserManager.create_user(email, password, full_name=display_name)
         if not user:
             flash('An account with that email already exists.')
             return render_template('register.html', plan=plan)
@@ -101,15 +101,6 @@ def auth_disconnect(pid):
 
 # ---------------------------------------------------------------------------
 # OAuth: Facebook
-# ---------------------------------------------------------------------------
-# Scopes:
-#   pages_show_list              -- let user pick which Page to connect
-#   pages_read_engagement        -- read Page likes, comments, shares
-#   pages_manage_posts           -- publish to the Page
-#   instagram_basic              -- read IG account info + follower count
-#   instagram_content_publish    -- publish to IG
-#   instagram_manage_insights    -- read IG reach, impressions, profile views
-#                                   (requires App Review for non-admin users)
 # ---------------------------------------------------------------------------
 
 @auth_bp.route('/auth/facebook')
@@ -311,11 +302,6 @@ def auth_tiktok_callback():
 # ---------------------------------------------------------------------------
 # OAuth: Twitter / X  (OAuth 2.0 + PKCE)
 # ---------------------------------------------------------------------------
-# Required app settings in developer.twitter.com:
-#   - App type: Web App  (allows client_secret)
-#   - Scopes: tweet.read  tweet.write  users.read  offline.access
-#   - Callback URL: https://<your-domain>/auth/twitter/callback
-# ---------------------------------------------------------------------------
 
 def _twitter_pkce_pair():
     """Return (code_verifier, code_challenge) for S256 PKCE."""
@@ -342,6 +328,7 @@ def auth_twitter():
         f'?response_type=code'
         f'&client_id={client_id}'
         f'&redirect_uri={redir}'
+        f'&response_type=code&scope={scope}&access_type=offline&state={state}'
         f'&scope={scopes}'
         f'&state={state}'
         f'&code_challenge={challenge}'
