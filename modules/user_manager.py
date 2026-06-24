@@ -1,482 +1,355 @@
 """
-user_manager.py — Multi-User Accounts & DB Schema (Phase 5 Session 9)
+user_manager.py — User accounts for Post-Pilot (Postgres / pp schema).
 
-Owns all four Phase 5 tables:
-  users             — Flask-Login auth, subscription tier, Stripe IDs
-  business_profiles — Per-user business info, subdomain, AI prefs
-  api_keys          — Public API key hashes (Phase 5 Session 12)
-  post_history      — Every published / scheduled post (analytics + repost)
+All tables live in the 'pp' schema on Supabase.
+The db connection sets search_path=pp automatically, so bare table
+names like `users`, `post_history`, etc. resolve correctly.
 
-Also owns the existing platform_tokens table created by auth_manager.py;
-both modules share the same postpilot.db file via DB_PATH.
+Column mapping (pp.users):
+  id, email, password_hash, full_name, business_name,
+  plan, stripe_customer_id, stripe_sub_id,
+  is_active, is_verified, verification_token,
+  reset_token, reset_token_expiry,
+  created_at, updated_at
 
 Usage:
     from modules.user_manager import UserManager, User
-    user = UserManager.create_user('hello@example.com', 'password123')
-    user = UserManager.get_user_by_email('hello@example.com')
-    UserManager.verify_password(user, 'password123')  # → True
+    user = UserManager.create_user('hi@example.com', 'password123')
+    user = UserManager.get_user_by_email('hi@example.com')
+    UserManager.verify_password(user, 'password123')  # -> True
 """
 
-import os
-import uuid
-import sqlite3
 import hashlib
-import secrets
 import logging
+import secrets
+import uuid
 from datetime import datetime
 from typing import Optional
 
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from flask_login import UserMixin
 
-logger  = logging.getLogger(__name__)
-DB_PATH = os.environ.get('DATABASE_URL', 'postpilot.db')
+from modules.database import get_db
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Flask-Login User model
 # ---------------------------------------------------------------------------
 class User(UserMixin):
-    """
-    Lightweight user object loaded from the DB and stored in the Flask-Login
-    session.  Matches the columns in the `users` table exactly.
-    """
+    """Lightweight user object that maps directly to pp.users columns."""
 
     def __init__(self, row: dict):
-        self.id                     = row['id']
-        self.email                  = row['email']
-        self.password_hash          = row['password_hash']
-        self.display_name           = row.get('display_name') or ''
-        self.subscription_tier      = row.get('subscription_tier', 'free')
-        self.stripe_customer_id     = row.get('stripe_customer_id')
-        self.stripe_sub_id          = row.get('stripe_sub_id')
-        self.sub_status             = row.get('sub_status', 'active')
-        self.sub_current_period_end = row.get('sub_current_period_end')
-        self.trial_ends_at          = row.get('trial_ends_at')
-        self.is_admin               = bool(row.get('is_admin', 0))
-        self.created_at             = row.get('created_at', '')
-        self.last_login_at          = row.get('last_login_at')
+        self.id                 = str(row['id'])
+        self.email              = row['email']
+        self.password_hash      = row['password_hash']
+        self.full_name          = row.get('full_name') or ''
+        self.business_name      = row.get('business_name') or ''
+        self.plan               = row.get('plan', 'free')
+        self.stripe_customer_id = row.get('stripe_customer_id')
+        self.stripe_sub_id      = row.get('stripe_sub_id')
+        self.is_active          = bool(row.get('is_active', True))
+        self.is_verified        = bool(row.get('is_verified', False))
+        self.created_at         = row.get('created_at', '')
+        self.updated_at         = row.get('updated_at', '')
 
-    # Flask-Login requires get_id() to return a string
+    # Flask-Login requires string ID
     def get_id(self) -> str:
         return self.id
 
+    # Convenience aliases so templates/blueprints don't break
+    @property
+    def display_name(self) -> str:
+        return self.full_name or self.business_name or self.email.split('@')[0]
+
+    @property
+    def subscription_tier(self) -> str:
+        return self.plan
+
     @property
     def is_free(self) -> bool:
-        return self.subscription_tier == 'free'
+        return self.plan == 'free'
 
     @property
     def is_paid(self) -> bool:
-        return self.subscription_tier in ('starter', 'growth', 'pro', 'agency')
+        return self.plan in ('starter', 'growth', 'pro', 'agency')
 
     def can_use_platform(self, platform: str) -> bool:
-        """
-        Tier gate: free users can only post to FB + website.
-        All paid tiers get all platforms.
-        """
         if self.is_paid:
             return True
-        free_platforms = {'fb', 'web'}
-        return platform in free_platforms
+        return platform in {'fb', 'web'}
 
     def ai_captions_limit(self) -> int:
-        """Monthly AI caption limit by tier."""
         limits = {'free': 5, 'starter': 30, 'growth': 150, 'pro': 999999, 'agency': 999999}
-        return limits.get(self.subscription_tier, 5)
+        return limits.get(self.plan, 5)
 
     def __repr__(self):
-        return f'<User {self.email} [{self.subscription_tier}]>'
+        return f'<User {self.email} [{self.plan}]>'
 
-
-from modules.database import get_db
 
 # ---------------------------------------------------------------------------
-# DB connection
+# Helper
 # ---------------------------------------------------------------------------
 def _get_conn():
     return get_db()
 
 
-
-
 # ---------------------------------------------------------------------------
-# Schema bootstrap
-# ---------------------------------------------------------------------------
-def init_db():
-    """
-    Create all Phase 5 tables and indexes if they don't exist.
-    Safe to call on every app start — uses IF NOT EXISTS throughout.
-    """
-    conn = _get_conn()
-
-    # ── users ──────────────────────────────────────────────────────────────
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id                      TEXT PRIMARY KEY,
-            email                   TEXT NOT NULL UNIQUE,
-            password_hash           TEXT NOT NULL,
-            display_name            TEXT,
-            subscription_tier       TEXT NOT NULL DEFAULT 'free',
-            stripe_customer_id      TEXT,
-            stripe_sub_id           TEXT,
-            sub_status              TEXT DEFAULT 'active',
-            sub_current_period_end  TEXT,
-            trial_ends_at           TEXT,
-            is_admin                INTEGER NOT NULL DEFAULT 0,
-            created_at              TEXT NOT NULL,
-            last_login_at           TEXT
-        )
-    ''')
-
-    # ── business_profiles ─────────────────────────────────────────────────
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS business_profiles (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       TEXT    NOT NULL UNIQUE REFERENCES users(id),
-            name          TEXT    NOT NULL DEFAULT '',
-            business_type TEXT    DEFAULT 'food_truck',
-            location      TEXT    DEFAULT '',
-            address       TEXT    DEFAULT '',
-            lat           REAL,
-            lng           REAL,
-            hours         TEXT    DEFAULT '',
-            phone         TEXT    DEFAULT '',
-            website_url   TEXT    DEFAULT '',
-            logo_url      TEXT    DEFAULT '',
-            prompt_time   TEXT    DEFAULT '07:00',
-            timezone      TEXT    DEFAULT 'US/Eastern',
-            ai_tone       TEXT    DEFAULT 'friendly',
-            ai_keywords   TEXT    DEFAULT '',
-            subdomain     TEXT    UNIQUE,
-            custom_domain TEXT,
-            updated_at    TEXT    NOT NULL
-        )
-    ''')
-
-    # ── api_keys ───────────────────────────────────────────────────────────
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS api_keys (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      TEXT    NOT NULL REFERENCES users(id),
-            label        TEXT    NOT NULL DEFAULT 'My Key',
-            key_hash     TEXT    NOT NULL UNIQUE,
-            key_preview  TEXT    NOT NULL,
-            is_active    INTEGER NOT NULL DEFAULT 1,
-            created_at   INTEGER NOT NULL,
-            expires_at   INTEGER,
-            last_used_at INTEGER,
-            call_count   INTEGER NOT NULL DEFAULT 0
-        )
-
-    ''')
-
-
-    # ── post_history ───────────────────────────────────────────────────────
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS post_history (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id      TEXT    NOT NULL REFERENCES users(id),
-            caption      TEXT,
-            content_type TEXT    DEFAULT 'text',
-            image_url    TEXT,
-            video_url    TEXT,
-            platforms    TEXT,
-            results      TEXT,
-            scheduled_at TEXT,
-            posted_at    TEXT,
-            status       TEXT    DEFAULT 'published',
-            post_url     TEXT,
-            created_at   TEXT    DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-        )
-    ''')
-
-    # ── indexes ────────────────────────────────────────────────────────────
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_biz_user      ON business_profiles(user_id)')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_api_user      ON api_keys(user_id)')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_history_user  ON post_history(user_id)')
-    conn.execute('CREATE INDEX IF NOT EXISTS idx_history_date  ON post_history(posted_at)')
-
-    conn.commit()
-    conn.close()
-    logger.info('user_manager: DB schema initialised')
-
-
-# ---------------------------------------------------------------------------
-# UserManager — all user CRUD operations
+# UserManager
 # ---------------------------------------------------------------------------
 class UserManager:
 
-    # ── Create ─────────────────────────────────────────────────────────────
+    # -- Create -------------------------------------------------------------
     @staticmethod
     def create_user(
         email: str,
         password: str,
-        display_name: str = '',
-        tier: str = 'free',
-    ) -> Optional['User']:
+        full_name: str = '',
+        business_name: str = '',
+        plan: str = 'free',
+    ) -> Optional[User]:
         """
-        Register a new user.  Returns the User object, or None if the
-        email is already taken.
-
-        Args:
-            email:        Must be unique.
-            password:     Plain-text — hashed with bcrypt before storage.
-            display_name: Optional human name / business name.
-            tier:         Subscription tier (default 'free').
+        Register a new user. Returns User on success, None if email taken.
         """
         email = email.strip().lower()
         try:
             conn  = _get_conn()
             uid   = str(uuid.uuid4())
             phash = generate_password_hash(password)
-            now   = datetime.utcnow().isoformat()
             conn.execute(
                 '''
                 INSERT INTO users
-                    (id, email, password_hash, display_name, subscription_tier, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (id, email, password_hash, full_name, business_name, plan)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ''',
-                (uid, email, phash, display_name, tier, now),
-            )
-            # Create empty business profile so it always exists
-            conn.execute(
-                'INSERT INTO business_profiles (user_id, updated_at) VALUES (?, ?)',
-                (uid, now),
+                (uid, email, phash, full_name, business_name, plan),
             )
             conn.commit()
-            conn.close()
             logger.info('User created: %s [%s]', email, uid)
             return UserManager.get_user(uid)
-        except sqlite3.IntegrityError:
-            logger.warning('create_user: email already exists: %s', email)
-            return None
-        except Exception as e:
-            logger.error('create_user error: %s', e)
+        except Exception as exc:
+            logger.warning('create_user failed for %s: %s', email, exc)
             return None
 
-    # ── Read ───────────────────────────────────────────────────────────────
+    # -- Read ---------------------------------------------------------------
     @staticmethod
-    def get_user(user_id: str) -> Optional['User']:
+    def get_user(user_id: str) -> Optional[User]:
         """Load a user by UUID. Returns None if not found."""
         conn = _get_conn()
-        row  = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
-        conn.close()
-        return User(dict(row)) if row else None
+        cur  = conn.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+        row  = cur.fetchone()
+        return User(row) if row else None
 
     @staticmethod
-    def get_user_by_email(email: str) -> Optional['User']:
-        """Load a user by email (case-insensitive). Returns None if not found."""
+    def get_user_by_email(email: str) -> Optional[User]:
+        """Load a user by email (case-insensitive)."""
         conn = _get_conn()
-        row  = conn.execute(
-            'SELECT * FROM users WHERE LOWER(email) = ?', (email.strip().lower(),)
-        ).fetchone()
-        conn.close()
-        return User(dict(row)) if row else None
+        cur  = conn.execute(
+            'SELECT * FROM users WHERE LOWER(email) = %s',
+            (email.strip().lower(),),
+        )
+        row = cur.fetchone()
+        return User(row) if row else None
 
     @staticmethod
-    def verify_password(user: 'User', password: str) -> bool:
+    def verify_password(user: User, password: str) -> bool:
         """Returns True if password matches the stored hash."""
         return check_password_hash(user.password_hash, password)
 
     @staticmethod
     def touch_login(user_id: str):
-        """Update last_login_at timestamp — called on successful login."""
+        """Update updated_at on successful login."""
         conn = _get_conn()
         conn.execute(
-            'UPDATE users SET last_login_at = ? WHERE id = ?',
-            (datetime.utcnow().isoformat(), user_id),
+            'UPDATE users SET updated_at = NOW() WHERE id = %s',
+            (user_id,),
         )
         conn.commit()
-        conn.close()
 
-    # ── Subscription ───────────────────────────────────────────────────────
+    # -- Update -------------------------------------------------------------
+    @staticmethod
+    def update_profile(user_id: str, full_name: str = None, business_name: str = None):
+        """Update display name / business name."""
+        fields, values = [], []
+        if full_name is not None:
+            fields.append('full_name = %s');      values.append(full_name)
+        if business_name is not None:
+            fields.append('business_name = %s'); values.append(business_name)
+        if not fields:
+            return
+        values.append(user_id)
+        conn = _get_conn()
+        conn.execute(
+            f"UPDATE users SET {', '.join(fields)} WHERE id = %s",
+            values,
+        )
+        conn.commit()
+
     @staticmethod
     def update_subscription(
         user_id: str,
-        tier: str,
+        plan: str,
         stripe_customer_id: str = None,
         stripe_sub_id: str = None,
-        sub_status: str = 'active',
-        period_end: str = None,
     ):
+        """
+        Update plan and Stripe metadata. Called by billing_manager on webhooks.
+        """
         conn = _get_conn()
         conn.execute(
             '''
             UPDATE users SET
-                subscription_tier      = ?,
-                stripe_customer_id     = COALESCE(?, stripe_customer_id),
-                stripe_sub_id          = COALESCE(?, stripe_sub_id),
-                sub_status             = ?,
-                sub_current_period_end = COALESCE(?, sub_current_period_end)
-            WHERE id = ?
+                plan                = %s,
+                stripe_customer_id  = COALESCE(%s, stripe_customer_id),
+                stripe_sub_id       = COALESCE(%s, stripe_sub_id)
+            WHERE id = %s
             ''',
-            (tier, stripe_customer_id, stripe_sub_id, sub_status, period_end, user_id),
+            (plan, stripe_customer_id, stripe_sub_id, user_id),
         )
         conn.commit()
-        conn.close()
-        logger.info('Subscription updated: user=%s tier=%s status=%s', user_id, tier, sub_status)
+        logger.info('Subscription updated: user=%s plan=%s', user_id, plan)
 
-    # ── Business Profile ───────────────────────────────────────────────────
+    # -- Password reset -----------------------------------------------------
     @staticmethod
-    def get_business_profile(user_id: str) -> dict:
-        conn = _get_conn()
-        row  = conn.execute(
-            'SELECT * FROM business_profiles WHERE user_id = ?', (user_id,)
-        ).fetchone()
-        conn.close()
-        if not row:
-            return {}
-        d = dict(row)
-        import json
-        if d.get('hours') and d['hours'].startswith('{'):
-            try:
-                d['hours'] = json.loads(d['hours'])
-            except Exception:
-                pass
-        return d
-
-    @staticmethod
-    def save_business_profile(user_id: str, data: dict):
-        import json
-        if isinstance(data.get('hours'), dict):
-            data['hours'] = json.dumps(data['hours'])
-
-        allowed = {
-            'name', 'business_type', 'location', 'address', 'lat', 'lng',
-            'hours', 'phone', 'website_url', 'logo_url', 'prompt_time',
-            'timezone', 'ai_tone', 'ai_keywords', 'subdomain', 'custom_domain',
-        }
-        fields = {k: v for k, v in data.items() if k in allowed}
-        if not fields:
-            return
-
-        fields['updated_at'] = datetime.utcnow().isoformat()
-        set_clause = ', '.join(f'{k} = ?' for k in fields)
-        values     = list(fields.values()) + [user_id]
-
-        conn = _get_conn()
+    def set_reset_token(email: str) -> Optional[str]:
+        """
+        Generate and store a password-reset token. Returns the raw token,
+        or None if the email is not found.
+        """
+        from datetime import timedelta
+        user = UserManager.get_user_by_email(email)
+        if not user:
+            return None
+        token  = secrets.token_urlsafe(32)
+        expiry = datetime.utcnow() + timedelta(hours=2)
+        conn   = _get_conn()
         conn.execute(
-            f'UPDATE business_profiles SET {set_clause} WHERE user_id = ?',
-            values,
+            'UPDATE users SET reset_token = %s, reset_token_expiry = %s WHERE id = %s',
+            (token, expiry, user.id),
         )
         conn.commit()
-        conn.close()
-        logger.info('Business profile updated for user=%s', user_id)
+        return token
 
-    # ── Post History ───────────────────────────────────────────────────────
+    @staticmethod
+    def reset_password(token: str, new_password: str) -> bool:
+        """
+        Consume a reset token and update password.
+        Returns True on success, False if token is invalid/expired.
+        """
+        conn = _get_conn()
+        cur  = conn.execute(
+            'SELECT id, reset_token_expiry FROM users WHERE reset_token = %s',
+            (token,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        expiry = row['reset_token_expiry']
+        if expiry and datetime.utcnow() > expiry.replace(tzinfo=None):
+            return False
+        phash = generate_password_hash(new_password)
+        conn.execute(
+            'UPDATE users SET password_hash = %s, reset_token = NULL, reset_token_expiry = NULL WHERE id = %s',
+            (phash, row['id']),
+        )
+        conn.commit()
+        return True
+
+    # -- Post history -------------------------------------------------------
     @staticmethod
     def log_post(
-        user_id:      str,
-        caption:      str,
-        content_type: str = 'text',
-        image_url:    str = None,
-        video_url:    str = None,
-        platforms:    dict = None,
-        results:      dict = None,
-        scheduled_at: str = None,
-        status:       str = 'published',
-        post_url:     str = None,
-    ) -> int:
+        user_id:          str,
+        content:          str,
+        platform:         str,
+        status:           str = 'published',
+        scheduled_at      = None,
+        media_urls:       list = None,
+        platform_post_id: str = None,
+    ) -> str:
+        """
+        Save a post to pp.post_queue. Returns the new row id.
+        """
         import json
-        conn = _get_conn()
-        now  = datetime.utcnow().isoformat()
-        cur  = conn.execute(
+        conn   = _get_conn()
+        row_id = str(uuid.uuid4())
+        conn.execute(
             '''
-            INSERT INTO post_history
-                (user_id, caption, content_type, image_url, video_url,
-                 platforms, results, scheduled_at, posted_at, status, post_url, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO post_queue
+                (id, user_id, platform, content, media_urls, status,
+                 scheduled_at, platform_post_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ''',
             (
-                user_id, caption, content_type, image_url, video_url,
-                json.dumps(platforms) if platforms else None,
-                json.dumps(results)   if results   else None,
-                scheduled_at,
-                now,
-                status,
-                post_url,
-                now,
+                row_id, user_id, platform, content,
+                json.dumps(media_urls or []),
+                status, scheduled_at, platform_post_id,
             ),
         )
         conn.commit()
-        row_id = cur.lastrowid
-        conn.close()
         return row_id
 
     @staticmethod
     def get_post_history(
-        user_id:  str,
-        limit:    int = 50,
-        offset:   int = 0,
-        status:   str = None,
-    ) -> list[dict]:
+        user_id: str,
+        limit:   int = 50,
+        offset:  int = 0,
+        status:  str = None,
+    ) -> list:
         import json
         conn   = _get_conn()
-        where  = 'WHERE user_id = ?'
+        where  = 'WHERE user_id = %s'
         params = [user_id]
         if status:
-            where  += ' AND status = ?'
+            where  += ' AND status = %s'
             params.append(status)
-        rows = conn.execute(
-            f'SELECT * FROM post_history {where} ORDER BY posted_at DESC LIMIT ? OFFSET ?',
+        cur  = conn.execute(
+            f'SELECT * FROM post_queue {where} ORDER BY created_at DESC LIMIT %s OFFSET %s',
             params + [limit, offset],
-        ).fetchall()
-        conn.close()
-
+        )
+        rows = cur.fetchall()
         result = []
         for row in rows:
             d = dict(row)
-            for field in ('platforms', 'results'):
-                if d.get(field):
-                    try:
-                        d[field] = json.loads(d[field])
-                    except Exception:
-                        pass
+            if d.get('media_urls'):
+                try:
+                    d['media_urls'] = json.loads(d['media_urls'])
+                except Exception:
+                    pass
             result.append(d)
         return result
 
-    # ── API Key management ─────────────────────────────────────────────────
+    # -- API Keys -----------------------------------------------------------
     @staticmethod
     def create_api_key(user_id: str, label: str = 'Default key') -> str:
-        import time
+        """
+        Generate a new API key. Returns the raw key (shown once, never stored).
+        """
         raw_key  = 'pp_live_' + secrets.token_hex(32)
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        preview  = raw_key[:12] + '...'
-        now      = int(time.time())
         conn     = _get_conn()
         conn.execute(
-            'INSERT INTO api_keys (user_id, key_hash, key_preview, label, created_at) VALUES (?, ?, ?, ?, ?)',
-            (user_id, key_hash, preview, label, now),
+            'INSERT INTO api_keys (user_id, key_hash, label) VALUES (%s, %s, %s)',
+            (user_id, key_hash, label),
         )
         conn.commit()
-        conn.close()
-        logger.info('API key created for user=%s label=%s', user_id, label)
+        logger.info('API key created for user=%s', user_id)
         return raw_key
 
     @staticmethod
-    def lookup_api_key(raw_key: str) -> Optional['User']:
-        import time
+    def lookup_api_key(raw_key: str) -> Optional[User]:
+        """Verify a raw API key and return the owning User."""
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
         conn     = _get_conn()
-        row      = conn.execute(
-            'SELECT user_id FROM api_keys WHERE key_hash = ? AND is_active = 1',
+        cur      = conn.execute(
+            'SELECT user_id FROM api_keys WHERE key_hash = %s AND is_active = TRUE',
             (key_hash,),
-        ).fetchone()
+        )
+        row = cur.fetchone()
         if row:
             conn.execute(
-                'UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?',
-                (int(time.time()), key_hash),
+                'UPDATE api_keys SET last_used = NOW() WHERE key_hash = %s',
+                (key_hash,),
             )
             conn.commit()
-        conn.close()
         return UserManager.get_user(row['user_id']) if row else None
-
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap on import
-# ---------------------------------------------------------------------------
-try:
-    init_db()
-except Exception as e:
-    logger.error('user_manager init_db failed: %s', e)

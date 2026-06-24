@@ -13,7 +13,7 @@ modules/auth_manager.py
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Tokens are Fernet-encrypted at rest using TOKEN_ENCRYPTION_KEY.
-Storage backend: SQLite (dev) or PostgreSQL (prod) via modules/db.py.
+Storage backend: PostgreSQL via modules/db.py (search_path=pp).
 """
 
 import os
@@ -47,53 +47,6 @@ except Exception as exc:
 
 
 # ---------------------------------------------------------------------------
-# DDL
-# ---------------------------------------------------------------------------
-CREATE_TOKENS_TABLE = adapt_schema('''
-    CREATE TABLE IF NOT EXISTS platform_tokens (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       TEXT    NOT NULL DEFAULT 'default',
-        platform      TEXT    NOT NULL,
-        access_token  TEXT    NOT NULL,
-        refresh_token TEXT,
-        expires_at    TEXT,
-        token_meta    TEXT,
-        updated_at    TEXT    NOT NULL,
-        UNIQUE (user_id, platform)
-    )
-''')
-
-
-def init_db():
-    """Create platform_tokens table if it does not exist."""
-    conn = get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(CREATE_TOKENS_TABLE)
-        conn.commit()
-        logger.info('auth_manager: platform_tokens table ready')
-    except Exception as e:
-        logger.error('auth_manager init_db failed: %s', e)
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-    finally:
-        conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Encrypt / decrypt
-# ---------------------------------------------------------------------------
-def _encrypt(value: str) -> str:
-    return fernet.encrypt(value.encode()).decode()
-
-
-def _decrypt(value: str) -> str:
-    return fernet.decrypt(value.encode()).decode()
-
-
-# ---------------------------------------------------------------------------
 # Save token
 # ---------------------------------------------------------------------------
 def save_token(platform: str, access_token: str, refresh_token: str = None,
@@ -103,32 +56,18 @@ def save_token(platform: str, access_token: str, refresh_token: str = None,
     expires_str = expires_at.isoformat() if expires_at else None
     meta_str    = json.dumps(meta) if meta else None
     now         = datetime.utcnow().isoformat()
-    p           = placeholder
 
-    if USE_POSTGRES:
-        sql = f'''
-            INSERT INTO platform_tokens
-                (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
-            VALUES ({p},{p},{p},{p},{p},{p},{p})
-            ON CONFLICT (user_id, platform) DO UPDATE SET
-                access_token  = EXCLUDED.access_token,
-                refresh_token = COALESCE(EXCLUDED.refresh_token, platform_tokens.refresh_token),
-                expires_at    = EXCLUDED.expires_at,
-                token_meta    = COALESCE(EXCLUDED.token_meta, platform_tokens.token_meta),
-                updated_at    = EXCLUDED.updated_at
-        '''
-    else:
-        sql = f'''
-            INSERT INTO platform_tokens
-                (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
-            VALUES ({p},{p},{p},{p},{p},{p},{p})
-            ON CONFLICT(user_id, platform) DO UPDATE SET
-                access_token  = excluded.access_token,
-                refresh_token = COALESCE(excluded.refresh_token, platform_tokens.refresh_token),
-                expires_at    = excluded.expires_at,
-                token_meta    = COALESCE(excluded.token_meta, platform_tokens.token_meta),
-                updated_at    = excluded.updated_at
-        '''
+    sql = '''
+        INSERT INTO platform_tokens
+            (user_id, platform, access_token, refresh_token, expires_at, token_meta, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (user_id, platform) DO UPDATE SET
+            access_token  = EXCLUDED.access_token,
+            refresh_token = COALESCE(EXCLUDED.refresh_token, platform_tokens.refresh_token),
+            expires_at    = EXCLUDED.expires_at,
+            token_meta    = COALESCE(EXCLUDED.token_meta, platform_tokens.token_meta),
+            updated_at    = EXCLUDED.updated_at
+    '''
 
     conn = get_connection()
     try:
@@ -150,18 +89,14 @@ def save_token(platform: str, access_token: str, refresh_token: str = None,
 # Load token
 # ---------------------------------------------------------------------------
 def load_token(platform: str, user_id: str = 'default') -> dict | None:
-    p   = placeholder
     sql = (
-        f'SELECT access_token, refresh_token, expires_at, token_meta '
-        f'FROM platform_tokens WHERE user_id={p} AND platform={p}'
+        'SELECT access_token, refresh_token, expires_at, token_meta '
+        'FROM platform_tokens WHERE user_id = %s AND platform = %s'
     )
     conn = get_connection()
     try:
-        if USE_POSTGRES:
-            import psycopg2.extras
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        else:
-            cur = conn.cursor()
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute(sql, (user_id, platform))
         row = cur.fetchone()
     finally:
@@ -170,10 +105,7 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
     if not row:
         return None
 
-    if isinstance(row, dict):
-        a, r, e, m = row['access_token'], row['refresh_token'], row['expires_at'], row['token_meta']
-    else:
-        a, r, e, m = row[0], row[1], row[2], row[3]
+    a, r, e, m = row['access_token'], row['refresh_token'], row['expires_at'], row['token_meta']
 
     return {
         'access_token':  _decrypt(a),
@@ -181,6 +113,17 @@ def load_token(platform: str, user_id: str = 'default') -> dict | None:
         'expires_at':    datetime.fromisoformat(e) if e else None,
         'meta':          json.loads(m) if m else {},
     }
+
+
+# ---------------------------------------------------------------------------
+# Encrypt / decrypt
+# ---------------------------------------------------------------------------
+def _encrypt(value: str) -> str:
+    return fernet.encrypt(value.encode()).decode()
+
+
+def _decrypt(value: str) -> str:
+    return fernet.decrypt(value.encode()).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -275,8 +218,7 @@ def refresh_tiktok_token(user_id: str = 'default') -> str | None:
 # Delete token
 # ---------------------------------------------------------------------------
 def delete_token(platform: str, user_id: str = 'default'):
-    p    = placeholder
-    sql  = f'DELETE FROM platform_tokens WHERE user_id={p} AND platform={p}'
+    sql  = 'DELETE FROM platform_tokens WHERE user_id = %s AND platform = %s'
     conn = get_connection()
     try:
         cur = conn.cursor()
@@ -287,12 +229,3 @@ def delete_token(platform: str, user_id: str = 'default'):
         logger.error('delete_token failed: %s', e)
     finally:
         conn.close()
-
-
-# ---------------------------------------------------------------------------
-# Bootstrap on import
-# ---------------------------------------------------------------------------
-try:
-    init_db()
-except Exception as e:
-    logger.error('auth_manager bootstrap failed: %s', e)
