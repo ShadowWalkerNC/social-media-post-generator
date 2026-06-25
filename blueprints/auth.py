@@ -50,31 +50,10 @@ def _send_magic_link(email: str, redirect_to: str = None) -> bool:
 
 # ---------------------------------------------------------------------------
 # DEV LOGIN — bypass email for dashboard testing
-# Usage: /dev-login?email=you@example.com&key=<DEV_LOGIN_KEY>
+# Usage: /dev-login?email=you@example.com&uid=<SUPABASE_UUID>&key=<DEV_LOGIN_KEY>
+# If uid is omitted, tries get_user_by_email (only works if pp.users row exists).
 # Disabled automatically when DEV_LOGIN_KEY is not set.
 # ---------------------------------------------------------------------------
-
-def _get_supabase_uid_for_email(email: str):
-    """Look up the real Supabase auth UUID for an email via the admin API."""
-    sb_url = os.getenv('SUPABASE_URL', '').rstrip('/')
-    sb_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY', '')
-    if not sb_url or not sb_key:
-        return None
-    try:
-        resp = requests.get(
-            f'{sb_url}/auth/v1/admin/users',
-            headers={'apikey': sb_key, 'Authorization': f'Bearer {sb_key}'},
-            params={'filter': email},
-            timeout=10,
-        ).json()
-        users = resp.get('users', [])
-        for u in users:
-            if u.get('email', '').lower() == email.lower():
-                return u.get('id')
-    except Exception as exc:
-        current_app.logger.error('_get_supabase_uid_for_email failed: %s', exc)
-    return None
-
 
 @auth_bp.route('/dev-login')
 def dev_login():
@@ -83,26 +62,26 @@ def dev_login():
         return 'Dev login is disabled.', 403
     if request.args.get('key') != dev_key:
         return 'Invalid key.', 403
+
     email = request.args.get('email', '').strip().lower()
+    uid   = request.args.get('uid', '').strip()
     if not email:
         return 'email param required.', 400
 
-    # Try to load existing pp.users row first
-    user = UserManager.get_user_by_email(email)
+    # If uid provided, upsert directly with the real Supabase UUID
+    if uid:
+        user = UserManager.get_user(uid)
+        if not user:
+            user = UserManager.upsert_user(uid, email, full_name='Dev User')
+    else:
+        user = UserManager.get_user_by_email(email)
 
     if not user:
-        # Need the real Supabase auth UUID — never generate a fake one
-        uid = _get_supabase_uid_for_email(email)
-        if not uid:
-            return (
-                f'No Supabase auth user found for {email}. '
-                'Create the user first at Supabase Dashboard → Authentication → Users.',
-                404,
-            )
-        user = UserManager.upsert_user(uid, email, full_name='Dev User')
-
-    if not user:
-        return 'Could not sync user row into pp.users. Check Vercel logs.', 500
+        return (
+            'Could not find or create user. '
+            'Pass the Supabase UUID as &uid=... — copy it from Authentication → Users in the dashboard.',
+            404,
+        )
 
     login_user(user, remember=True)
     UserManager.touch_login(user.id)
