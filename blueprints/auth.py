@@ -2,12 +2,6 @@
 blueprints/auth.py
 Authentication routes: magic link (Supabase Auth), logout.
 OAuth flows: Facebook, Google, TikTok, Twitter/X.
-
-Flow:
-  1. User enters email on /register or /login
-  2. We call supabase.auth.sign_in_with_otp() — Supabase emails them a magic link
-  3. Supabase redirects to /auth/confirm?token_hash=...&type=magiclink
-  4. We exchange the token, create/sync pp.users row, log in via Flask-Login
 """
 
 import base64
@@ -37,16 +31,12 @@ APP_URL = os.getenv('APP_URL', 'https://post-pilot-opal.vercel.app')
 # ---------------------------------------------------------------------------
 
 def _get_supabase():
-    """Return the supabase client initialised in app.py."""
     return current_app.extensions['supabase']
 
 
 def _send_magic_link(email: str, redirect_to: str = None) -> bool:
-    """Send a Supabase magic-link OTP. Returns True on success."""
     sb = _get_supabase()
     try:
-        # supabase-py v2: OtpOptions uses email_redirect_to at top level
-        from gotrue.types import OtpType
         params = {'email': email}
         if redirect_to:
             params['options'] = {'email_redirect_to': redirect_to}
@@ -56,6 +46,36 @@ def _send_magic_link(email: str, redirect_to: str = None) -> bool:
     except Exception as exc:
         current_app.logger.error('magic link send failed for %s: %s', email, exc, exc_info=True)
         return False
+
+
+# ---------------------------------------------------------------------------
+# DEV LOGIN — bypass email for dashboard testing
+# Usage: /dev-login?email=you@example.com&key=<DEV_LOGIN_KEY>
+# Disabled automatically when DEV_LOGIN_KEY is not set.
+# ---------------------------------------------------------------------------
+
+@auth_bp.route('/dev-login')
+def dev_login():
+    dev_key = os.getenv('DEV_LOGIN_KEY', '')
+    if not dev_key:
+        return 'Dev login is disabled.', 403
+    if request.args.get('key') != dev_key:
+        return 'Invalid key.', 403
+    email = request.args.get('email', '').strip().lower()
+    if not email:
+        return 'email param required.', 400
+    user = UserManager.get_user_by_email(email)
+    if not user:
+        # Auto-create the user row if it doesn't exist yet
+        import uuid
+        fake_uid = str(uuid.uuid5(uuid.NAMESPACE_DNS, email))
+        user = UserManager.upsert_user(fake_uid, email, full_name='Dev User')
+    if not user:
+        return 'Could not create user.', 500
+    login_user(user, remember=True)
+    UserManager.touch_login(user.id)
+    flash('Dev login successful.', 'success')
+    return redirect(url_for('pages.home'))
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +123,7 @@ def login():
 
 
 # ---------------------------------------------------------------------------
-# Magic Link Confirm  (Supabase redirects here after user clicks email link)
+# Magic Link Confirm
 # ---------------------------------------------------------------------------
 
 @auth_bp.route('/auth/confirm')
