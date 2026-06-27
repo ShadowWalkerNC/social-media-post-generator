@@ -29,7 +29,7 @@ All from one screen. No switching between apps.
 ├──────────────────┬──────────────────────────┬───────────────────┤
 │ ✏️ COMPOSE       │ 👁️ LIVE PREVIEW           │ 📋 ACTIVITY FEED  │
 │                  │                          │                   │
-│ Caption textarea │ [FB] [IG] [TT] [GB] [WEB]│ ✅ FB Published   │
+│ Caption textarea │ [FB] [IG] [TT] [GB] [WEB] │ ✅ FB Published   │
 │ Image URL        │                          │ ✅ IG Published   │
 │ Link URL         │  ┌─────────────────────┐ │ 🎵 TT Script ready│
 │                  │  │ Mock post preview   │ │                   │
@@ -51,7 +51,7 @@ All from one screen. No switching between apps.
 git clone https://github.com/ShadowWalkerNC/Post-Pilot.git
 cd Post-Pilot
 pip install -r requirements.txt
-cp .env.example .env   # add your API keys
+cp .env.example .env
 python app.py
 # open http://localhost:5000
 ```
@@ -70,10 +70,8 @@ python app.py
 
 ### Website Banner — 1-Line Setup
 ```html
-<!-- Add this to your website's <head> tag -->
 <script src="https://YOUR-APP-URL/static/embed.js"></script>
 ```
-Every time you push a website update in Post-Pilot, your banner updates automatically.
 
 ---
 
@@ -81,43 +79,28 @@ Every time you push a website update in Post-Pilot, your banner updates automati
 
 ```
 Post-Pilot/
-├── app.py                     # App factory: extensions, DB, error handlers
+├── app.py
 ├── blueprints/
-│   ├── auth.py                # Login, register, logout, OAuth flows
-│   ├── billing.py             # Stripe checkout, portal, cancel, webhook
-│   ├── api.py                 # All /api/* endpoints
-│   ├── website.py             # Website hub + public site renderer
-│   ├── pages.py               # Dashboard, setup, calendar, onboarding
-│   └── utils.py               # Shared helpers (_uid, _get_tokens, etc.)
+│   ├── auth.py
+│   ├── billing.py
+│   ├── api.py
+│   ├── website.py
+│   ├── pages.py
+│   └── utils.py
 ├── modules/
-│   ├── publisher.py           # Universal push to all platforms
-│   ├── validator.py           # Input validation for publish requests
-│   ├── post_generator.py      # AI caption generation
-│   ├── billing_manager.py     # Stripe integration
-│   ├── plan_guard.py          # Subscription tier enforcement
-│   ├── post_scheduler.py      # APScheduler integration
-│   ├── analytics_client.py    # Meta Insights API
-│   ├── auth_manager.py        # OAuth token storage
-│   ├── user_manager.py        # User CRUD + login helpers
-│   └── website_manager.py     # Website hub logic
+│   ├── publisher.py
+│   ├── validator.py
+│   ├── post_generator.py
+│   ├── billing_manager.py
+│   ├── plan_guard.py
+│   ├── post_scheduler.py
+│   ├── analytics_client.py
+│   ├── auth_manager.py
+│   ├── user_manager.py
+│   └── website_manager.py
 ├── templates/
-│   ├── dashboard.html         # One-page command center
-│   ├── index.html             # Landing page
-│   ├── setup.html
-│   ├── generate.html
-│   ├── calendar.html
-│   ├── analytics.html
-│   └── billing.html
 ├── static/
-│   ├── dashboard.js
-│   ├── embed.js               # Website banner embed (1-line setup)
-│   ├── banner.json            # Live banner data
-│   └── style.css
 ├── tests/
-│   ├── conftest.py
-│   ├── test_smoke.py
-│   ├── test_p0_fixes.py       # Billing bypass, XSS, OAuth CSRF
-│   └── test_validator.py      # Input validation unit tests
 ├── .env.example
 ├── requirements.txt
 └── TODO.md
@@ -132,6 +115,38 @@ Post-Pilot/
 - [x] Phase 3 — One-page command center + Google Business + Website banner
 - [x] Phase 4 — SaaS billing, auth, plan enforcement, blueprint architecture
 - [ ] Phase 5 — Alembic migrations, multi-user teams, advanced analytics
+
+---
+
+## 🚀 Agent Session Bootstrap
+
+This repo follows the **Universal Project Architect (UPA)** workflow. Start every AI session by loading the system files below and filling in the context block.
+
+**Full reference:** [BOOT.md](https://github.com/ShadowWalkerNC/.github/blob/main/BOOT.md)
+
+```
+Load and follow these files before responding:
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/AGENTS.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/SESSION_START.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/AGENT_DISPATCH.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/UPA_V1.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/UPA_LIGHT_MODE.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/UPA_ESCALATION_CHECKLIST.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/agents/AGENT_COHERENCE.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/agents/AGENT_SECURITY.md
+https://raw.githubusercontent.com/ShadowWalkerNC/.github/main/agents/AGENT_DOCS.md
+https://raw.githubusercontent.com/ShadowWalkerNC/Post-Pilot/main/AGENTS.md
+https://raw.githubusercontent.com/ShadowWalkerNC/Post-Pilot/main/ARCHITECTURE.md
+
+PROJECT:      Post-Pilot
+PHASE:        [current phase]
+LAST COMMIT:  [SHA or description]
+MODE:         [full | quick | audit | hotfix | onboard]
+AGENT:        [Perplexity | Claude | Cursor | Copilot]
+OPEN:         [2-3 open items or "see TODO"]
+SCOPE:        [what you want this session]
+OUT OF SCOPE: [what you are not doing]
+```
 
 ---
 
