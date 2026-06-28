@@ -1,7 +1,7 @@
 # Deploying Post-Pilot
 
 Post-Pilot is a Python/Flask web app deployed on **Railway** — the same platform as Sigil.
-Both projects live under the same Railway account, both auto-deploy on `git push` to `main`.
+Both projects live under the same Railway account and auto-deploy on `git push` to `main`.
 
 ---
 
@@ -11,19 +11,41 @@ Both projects live under the same Railway account, both auto-deploy on `git push
 2. Select `ShadowWalkerNC/Post-Pilot`
 3. Railway detects `railway.toml` and configures the service automatically
 4. Click **Deploy** — Railway runs `pip install -r requirements.txt` then starts gunicorn
-5. Once live, go to **Settings → Networking → Generate Domain** to get your public URL:
+5. Once live, go to **Settings → Networking → Generate Domain**:
    `https://post-pilot-production.up.railway.app`
 
 ---
 
-## 2. Set Environment Variables
+## 2. Add Plugins (before setting Variables)
 
-Railway dashboard → your Post-Pilot service → **Variables** tab:
+In the Railway project, add these two plugins first — they auto-inject their connection URLs:
+
+| Plugin | Auto-injected Variable | Used for |
+|--------|------------------------|----------|
+| **PostgreSQL** | `DATABASE_URL` | Production database |
+| **Redis** | `REDIS_URL` | Rate limiting across workers |
+
+Railway dashboard → **New** → **Database** → select Postgres / Redis.
+
+> **Local dev:** SQLite is still used by default when `DATABASE_URL` is not set.
+> Set `DATABASE_PATH=postpilot.db` in your local `.env`. No volume needed locally.
+
+---
+
+## 3. Set Environment Variables
+
+Railway dashboard → Post-Pilot service → **Variables** tab.
+Use `.env.example` as the reference — all keys are documented there with notes.
 
 | Variable | Where to get it |
 |---|---|
 | `FLASK_SECRET_KEY` | Any random 32+ char string |
-| `DATABASE_PATH` | `postpilot.db` (Railway persistent volume, see Step 3) |
+| `TOKEN_ENCRYPTION_KEY` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `DATABASE_URL` | Auto-injected by Railway Postgres plugin |
+| `SUPABASE_URL` | Supabase dashboard → Project Settings → API |
+| `SUPABASE_ANON_KEY` | Same — "anon / public" key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Same — "service_role" key (keep secret, server-side only) |
+| `REDIS_URL` | Auto-injected by Railway Redis plugin |
 | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
 | `STRIPE_SECRET_KEY` | [dashboard.stripe.com](https://dashboard.stripe.com) → Developers → API keys |
 | `STRIPE_WEBHOOK_SECRET` | Stripe → Webhooks → your endpoint → Signing secret |
@@ -39,26 +61,38 @@ Railway dashboard → your Post-Pilot service → **Variables** tab:
 | `TIKTOK_CLIENT_KEY` | [developers.tiktok.com](https://developers.tiktok.com) |
 | `TIKTOK_CLIENT_SECRET` | Same |
 | `TIKTOK_REDIRECT_URI` | `https://<your-railway-domain>/auth/tiktok/callback` |
+| `TWITTER_CLIENT_ID` | [developer.twitter.com](https://developer.twitter.com) → App → OAuth 2.0 settings |
+| `TWITTER_CLIENT_SECRET` | Same |
+| `TWITTER_REDIRECT_URI` | `https://<your-railway-domain>/auth/twitter/callback` |
+| `SENTRY_DSN` | [sentry.io](https://sentry.io) → Project → Settings → DSN (optional) |
 
 ---
 
-## 3. Add a Persistent Volume (keeps the DB across deploys)
+## 4. Run Alembic Migrations
 
-SQLite on Railway needs a mounted volume so `postpilot.db` survives redeploys.
+After first deploy, run migrations to initialise the Postgres schema:
 
-1. Railway dashboard → Post-Pilot service → **Volumes** → **Add Volume**
-2. Mount path: `/data`
-3. Set `DATABASE_PATH=/data/postpilot.db` in Variables
+```bash
+# Option A — via Railway CLI
+railway run alembic upgrade head
 
-The DB is created automatically on first boot via `init_db()` in `app.py`.
+# Option B — add a one-off start command in the Railway dashboard,
+# run it once, then switch back to the gunicorn start command.
+```
+
+For subsequent deploys, migrations run automatically if you add this to `railway.toml`:
+```toml
+[build]
+buildCommand = "pip install -r requirements.txt && alembic upgrade head"
+```
 
 ---
 
-## 4. Set Up Stripe Webhook
+## 5. Set Up Stripe Webhook
 
 1. Stripe → **Developers** → **Webhooks** → **Add endpoint**
 2. URL: `https://<your-railway-domain>/webhooks/stripe`
-3. Events:
+3. Events to subscribe:
    - `checkout.session.completed`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
@@ -67,7 +101,7 @@ The DB is created automatically on first boot via `init_db()` in `app.py`.
 
 ---
 
-## 5. Create Stripe Products
+## 6. Create Stripe Products
 
 Stripe dashboard → **Products** → **Add product** × 3:
 
@@ -81,7 +115,7 @@ Copy the **price IDs** (`price_xxx`) into Railway Variables.
 
 ---
 
-## 6. Wire Sigil → Post-Pilot
+## 7. Wire Sigil → Post-Pilot
 
 Once Post-Pilot is live:
 
@@ -99,7 +133,7 @@ Once Post-Pilot is live:
 
 ---
 
-## 7. Update SRN_REGISTRY.json
+## 8. Update SRN_REGISTRY.json
 
 In `ShadowRealm/SRN_REGISTRY.json`, update:
 
@@ -113,7 +147,7 @@ In `ShadowRealm/SRN_REGISTRY.json`, update:
 
 ---
 
-## 8. Smoke Test Checklist
+## 9. Smoke Test Checklist
 
 ```
 ☐ GET  https://<domain>/           → marketing page loads
@@ -138,7 +172,7 @@ In `ShadowRealm/SRN_REGISTRY.json`, update:
 git clone https://github.com/ShadowWalkerNC/Post-Pilot.git
 cd Post-Pilot
 python -m venv venv
-source venv/bin/activate   # Windows: venv\\Scripts\\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your keys
