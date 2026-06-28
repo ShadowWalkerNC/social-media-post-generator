@@ -1,0 +1,294 @@
+{% extends 'dashboard.html' %}
+{% block title %}Schedule — Post-Pilot{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl font-bold text-white">Post Schedule</h1>
+      <p class="text-gray-400 mt-1">Add items and the agent posts them automatically at the time you choose.</p>
+    </div>
+    <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition">
+      + Add Special
+    </button>
+  </div>
+
+  <!-- Status legend -->
+  <div class="flex gap-4 mb-6 text-sm">
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span> Pending</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span> Queued</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span> Published</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500 inline-block"></span> Cancelled</span>
+  </div>
+
+  <!-- Specials table -->
+  <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-gray-400 border-b border-gray-800">
+          <th class="text-left px-4 py-3">Item</th>
+          <th class="text-left px-4 py-3">Date</th>
+          <th class="text-left px-4 py-3">Time (UTC)</th>
+          <th class="text-left px-4 py-3">Platforms</th>
+          <th class="text-left px-4 py-3">Tone</th>
+          <th class="text-left px-4 py-3">Status</th>
+          <th class="text-right px-4 py-3">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="specials-tbody">
+        <tr id="empty-row">
+          <td colspan="7" class="text-center text-gray-500 py-12">No specials yet — click "+ Add Special" to start.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- Add / Edit Modal -->
+<div id="modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6">
+    <h2 id="modal-title" class="text-lg font-bold text-white mb-5">Add Special</h2>
+
+    <form id="special-form" class="space-y-4">
+      <input type="hidden" id="edit-id" value="">
+
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Item name <span class="text-red-400">*</span></label>
+        <input id="item_name" type="text" placeholder="e.g. Truffle Burger" required
+               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Description / keywords <span class="text-gray-600">(optional — helps AI)</span></label>
+        <input id="description" type="text" placeholder="e.g. smoked brisket, truffle aioli, limited run"
+               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Date <span class="text-red-400">*</span></label>
+          <input id="post_date" type="date" required
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Time UTC <span class="text-red-400">*</span></label>
+          <input id="post_time" type="time" value="11:00" required
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Content type</label>
+          <select id="content_type" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {% for ct in content_types %}
+            <option value="{{ ct }}">{{ ct.replace('_',' ').title() }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Tone</label>
+          <select id="tone" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {% for t in tones %}
+            <option value="{{ t }}">{{ t.title() }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-400 mb-2">Platforms</label>
+        <div class="grid grid-cols-2 gap-2">
+          {% for pl in ui_platforms %}
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" name="platforms" value="{{ pl.key }}"
+                   class="rounded text-indigo-500 focus:ring-indigo-500"
+                   {% if pl.key in ['fb','ig','tt','gb','web'] %}checked{% endif %}>
+            <span class="text-sm text-gray-300">{{ pl.label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Image URL <span class="text-gray-600">(optional)</span></label>
+        <input id="image_url" type="url" placeholder="https://..."
+               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+
+      <div id="form-error" class="text-red-400 text-sm hidden"></div>
+
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition" id="submit-btn">Save</button>
+        <button type="button" onclick="closeModal()" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const STATUS_COLORS = {
+  pending:   'bg-yellow-400/20 text-yellow-300',
+  queued:    'bg-blue-400/20 text-blue-300',
+  published: 'bg-green-400/20 text-green-300',
+  cancelled: 'bg-gray-500/20 text-gray-400',
+};
+
+async function loadSpecials() {
+  const res  = await fetch('/api/specials');
+  const data = await res.json();
+  if (!data.success) return;
+  renderSpecials(data.specials);
+}
+
+function renderSpecials(specials) {
+  const tbody = document.getElementById('specials-tbody');
+  const empty = document.getElementById('empty-row');
+  if (!specials.length) { empty.style.display = ''; return; }
+  empty.style.display = 'none';
+  // Remove old dynamic rows
+  tbody.querySelectorAll('tr[data-id]').forEach(r => r.remove());
+  specials.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-id', s.id);
+    tr.className = 'border-t border-gray-800 hover:bg-gray-800/40 transition';
+    const statusCls = STATUS_COLORS[s.status] || 'bg-gray-500/20 text-gray-400';
+    const plLabels  = (s.platforms || []).join(', ');
+    const canEdit   = s.status === 'pending';
+    tr.innerHTML = `
+      <td class="px-4 py-3 text-white font-medium">${esc(s.item_name)}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(s.post_date)}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(s.post_time)}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc(plLabels)}</td>
+      <td class="px-4 py-3 text-gray-400">${esc(s.tone || '')}</td>
+      <td class="px-4 py-3">
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium ${statusCls}">${esc(s.status)}</span>
+      </td>
+      <td class="px-4 py-3 text-right space-x-2">
+        ${canEdit ? `<button onclick="openEditModal(${s.id})" class="text-indigo-400 hover:text-indigo-300 text-xs">Edit</button>` : ''}
+        ${canEdit ? `<button onclick="cancelSpecial(${s.id})" class="text-yellow-500 hover:text-yellow-400 text-xs">Cancel</button>` : ''}
+        <button onclick="deleteSpecial(${s.id})" class="text-red-500 hover:text-red-400 text-xs">Delete</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Modal helpers ──────────────────────────────────────────────────────────
+
+function openModal(data = {}) {
+  document.getElementById('modal').classList.remove('hidden');
+  document.getElementById('modal-title').textContent = data.id ? 'Edit Special' : 'Add Special';
+  document.getElementById('edit-id').value        = data.id || '';
+  document.getElementById('item_name').value      = data.item_name || '';
+  document.getElementById('description').value    = data.description || '';
+  document.getElementById('post_date').value      = data.post_date || '';
+  document.getElementById('post_time').value      = data.post_time || '11:00';
+  document.getElementById('content_type').value  = data.content_type || 'daily_special';
+  document.getElementById('tone').value          = data.tone || 'friendly';
+  document.getElementById('image_url').value     = data.image_url || '';
+  // Set platform checkboxes
+  const activePlatforms = data.platforms || ['fb','ig','tt','gb','web'];
+  document.querySelectorAll('input[name="platforms"]').forEach(cb => {
+    cb.checked = activePlatforms.includes(cb.value);
+  });
+  document.getElementById('form-error').classList.add('hidden');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+}
+
+async function openEditModal(id) {
+  const res  = await fetch('/api/specials');
+  const data = await res.json();
+  const s    = (data.specials || []).find(x => x.id === id);
+  if (s) openModal(s);
+}
+
+// ── Form submit ────────────────────────────────────────────────────────────
+
+document.getElementById('special-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('form-error');
+  errEl.classList.add('hidden');
+
+  const platforms = Array.from(
+    document.querySelectorAll('input[name="platforms"]:checked')
+  ).map(cb => cb.value);
+
+  if (!platforms.length) {
+    errEl.textContent = 'Select at least one platform.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const payload = {
+    item_name:    document.getElementById('item_name').value.trim(),
+    description:  document.getElementById('description').value.trim(),
+    post_date:    document.getElementById('post_date').value,
+    post_time:    document.getElementById('post_time').value,
+    content_type: document.getElementById('content_type').value,
+    tone:         document.getElementById('tone').value,
+    image_url:    document.getElementById('image_url').value.trim() || null,
+    platforms,
+  };
+
+  const editId = document.getElementById('edit-id').value;
+  const url    = editId ? `/api/specials/${editId}` : '/api/specials';
+  const method = editId ? 'PUT' : 'POST';
+
+  document.getElementById('submit-btn').textContent = 'Saving...';
+  try {
+    const res  = await fetch(url, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal();
+      loadSpecials();
+    } else {
+      errEl.textContent = (data.errors || [data.error]).join(' ');
+      errEl.classList.remove('hidden');
+    }
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.classList.remove('hidden');
+  } finally {
+    document.getElementById('submit-btn').textContent = 'Save';
+  }
+});
+
+// ── Delete / Cancel ────────────────────────────────────────────────────────
+
+async function deleteSpecial(id) {
+  if (!confirm('Delete this special? This cannot be undone.')) return;
+  const res = await fetch(`/api/specials/${id}`, { method: 'DELETE' });
+  if ((await res.json()).success) loadSpecials();
+}
+
+async function cancelSpecial(id) {
+  if (!confirm('Cancel this special? The agent will skip it.')) return;
+  const res = await fetch(`/api/specials/${id}/cancel`, { method: 'POST' });
+  if ((await res.json()).success) loadSpecials();
+}
+
+// Close modal on backdrop click
+document.getElementById('modal').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// Initial load
+loadSpecials();
+</script>
+{% endblock %}

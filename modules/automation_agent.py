@@ -1,61 +1,40 @@
 """
 modules/automation_agent.py
-Post-Pilot Autonomous Content Agent
+Post-Pilot Autonomous Content Agent  (v2 -- specials-driven)
 
-This module is the brain of Post-Pilot's autonomous publishing loop.
-It runs on a schedule (via Vercel Cron -> POST /api/cron/generate) and:
+The agent runs every hour via Vercel Cron -> POST /api/cron/generate.
+Instead of inventing content, it reads the user's specials table and
+generates posts for any items scheduled for today that are still pending.
 
-  1. Loads each active user's business_profile from the DB.
-  2. Inspects post_history to avoid content repetition.
-  3. Decides which content type is due (daily_special, location, general).
-  4. Calls ai_generator.generate_with_adaptations() -> Claude/OpenAI.
-  5. Writes a scheduled post_history row (status='scheduled').
-  6. Writes an automation_log row with the full decision audit trail.
+Flow:
+  1. For each user with a completed business profile:
+  2. Query specials WHERE post_date = today AND status = 'pending'
+  3. For each due special:
+       a. Generate per-platform captions via OpenAI (master + adapt)
+       b. Parse post_time -> Unix timestamp for scheduled_at
+       c. Write post_history row (status='scheduled')
+       d. Update special.status = 'queued', special.post_history_id = <id>
+       e. Write automation_log audit row
 
-The cron job at /api/cron/publish (runs every minute) picks up the
-scheduled rows and pushes them live via UniversalPublisher.
+The cron job at /api/cron/publish (every minute) picks up the scheduled
+post_history rows and pushes them live via UniversalPublisher.
 
-Active platforms (LinkedIn and Pinterest excluded -- not yet implemented):
-    fb, ig, tt, yt, yts, tw, gb, web
-
-Design notes:
-  - One agent run per user per scheduled interval.
-  - Content rotation: cycles daily_special -> location -> general -> repeat.
-  - Minimum gap between posts: 4 hours (configurable via MIN_POST_GAP_HOURS).
-  - All decisions are logged to automation_log for auditability.
-  - Agent is stateless -- all state is read from the DB on each run.
+Active platforms: fb, ig, tt, yt, yts, tw, gb, web
+(LinkedIn and Pinterest excluded until publishers are implemented)
 """
 
 import json
 import logging
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from modules.db import get_connection, placeholder
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 # Platforms the agent will generate content for.
-# LinkedIn and Pinterest are excluded until their publishers are implemented.
 ACTIVE_PLATFORMS: List[str] = ['fb', 'ig', 'tt', 'yt', 'yts', 'tw', 'gb', 'web']
-
-# Content type rotation order
-CONTENT_ROTATION: List[str] = ['daily_special', 'location', 'general']
-
-# Minimum hours between autonomous posts per user
-MIN_POST_GAP_HOURS: int = 4
-
-# Optimal post times per content type (24h UTC)
-OPTIMAL_SCHEDULE: Dict[str, Dict[str, int]] = {
-    'daily_special': {'hour': 11, 'minute': 0},   # 11 AM -- lunch decision window
-    'location':      {'hour': 8,  'minute': 0},   # 8 AM  -- morning commute
-    'general':       {'hour': 17, 'minute': 0},   # 5 PM  -- evening engagement peak
-}
 
 
 # ---------------------------------------------------------------------------
@@ -65,40 +44,35 @@ OPTIMAL_SCHEDULE: Dict[str, Dict[str, int]] = {
 def run_for_all_users() -> Dict:
     """
     Entry point called by POST /api/cron/generate.
-    Iterates all users with complete business profiles and runs the agent.
+    Iterates all users with complete business profiles and queues any
+    specials due today that are still pending.
 
     Returns a summary dict for the cron endpoint to log/return.
     """
-    conn = get_connection()
-    summary = {'processed': 0, 'scheduled': 0, 'skipped': 0, 'errors': 0}
+    conn    = get_connection()
+    today   = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    summary = {'processed': 0, 'queued': 0, 'skipped': 0, 'errors': 0}
 
     try:
         cur = conn.cursor()
-        # Only users who have completed onboarding (name is set)
         cur.execute(
-            "SELECT user_id, name, business_type, location, hours, "
-            "ai_tone, ai_keywords, timezone "
+            "SELECT user_id, name, business_type, location, hours, ai_tone "
             "FROM business_profiles "
             "WHERE name IS NOT NULL AND name != ''"
         )
-        rows = cur.fetchall()
+        users = cur.fetchall()
     except Exception as e:
         logger.error('automation_agent: failed to load business profiles: %s', e)
         conn.close()
         return {**summary, 'error': str(e)}
 
-    for row in rows:
-        profile = _row_to_dict(row, [
-            'user_id', 'name', 'business_type', 'location',
-            'hours', 'ai_tone', 'ai_keywords', 'timezone',
-        ])
+    for row in users:
+        profile = _row_to_dict(row, ['user_id', 'name', 'business_type', 'location', 'hours', 'ai_tone'])
         summary['processed'] += 1
         try:
-            result = _run_for_user(conn, profile)
-            if result == 'scheduled':
-                summary['scheduled'] += 1
-            else:
-                summary['skipped'] += 1
+            queued = _process_user(conn, profile, today)
+            summary['queued']  += queued
+            summary['skipped'] += 1 if queued == 0 else 0
         except Exception as e:
             logger.error('automation_agent: error for user %s: %s', profile.get('user_id'), e)
             summary['errors'] += 1
@@ -109,171 +83,190 @@ def run_for_all_users() -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# Per-user agent logic
+# Per-user processing
 # ---------------------------------------------------------------------------
 
-def _run_for_user(conn, profile: Dict) -> str:
+def _process_user(conn, profile: Dict, today: str) -> int:
     """
-    Run the agent for a single user.
-    Returns 'scheduled' if a post was queued, 'skipped' otherwise.
+    Queue all pending specials for today for a single user.
+    Returns the number of posts queued.
     """
     user_id = profile['user_id']
     p       = placeholder
+    queued  = 0
 
-    # 1. Check minimum gap -- don't post if we posted recently
-    last_post_ts = _get_last_post_ts(conn, user_id)
-    now_ts       = int(time.time())
-    if last_post_ts and (now_ts - last_post_ts) < (MIN_POST_GAP_HOURS * 3600):
-        logger.info('automation_agent: skipping user %s -- last post was < %dh ago', user_id, MIN_POST_GAP_HOURS)
-        return 'skipped'
+    # Load all pending specials due today
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, item_name, description, post_date, post_time, "
+            f"platforms, content_type, tone, image_url "
+            f"FROM specials "
+            f"WHERE user_id = {p} AND post_date = {p} AND status = 'pending'",
+            (user_id, today)
+        )
+        specials = cur.fetchall()
+    except Exception as e:
+        logger.error('automation_agent: failed to load specials for user %s: %s', user_id, e)
+        return 0
 
-    # 2. Decide content type (rotate based on recent history)
-    content_type = _decide_content_type(conn, user_id)
+    if not specials:
+        logger.info('automation_agent: no pending specials today for user %s', user_id)
+        return 0
 
-    # 3. Build business_info dict for ai_generator
+    for row in specials:
+        special = _row_to_dict(row, [
+            'id', 'item_name', 'description', 'post_date', 'post_time',
+            'platforms', 'content_type', 'tone', 'image_url',
+        ])
+        try:
+            ok = _queue_special(conn, profile, special)
+            if ok:
+                queued += 1
+        except Exception as e:
+            logger.error(
+                'automation_agent: failed to queue special %s for user %s: %s',
+                special.get('id'), user_id, e
+            )
+
+    return queued
+
+
+def _queue_special(conn, profile: Dict, special: Dict) -> bool:
+    """
+    Generate captions for one special and write a post_history row.
+    Marks the special as 'queued' on success.
+    Returns True on success.
+    """
+    user_id      = profile['user_id']
+    special_id   = special['id']
+    content_type = special.get('content_type') or 'daily_special'
+    tone         = special.get('tone') or profile.get('ai_tone') or 'friendly'
+    image_url    = special.get('image_url')
+
+    # Resolve platforms: use special-level override or fall back to ACTIVE_PLATFORMS
+    platforms_raw = special.get('platforms')
+    try:
+        platforms = json.loads(platforms_raw) if platforms_raw else ACTIVE_PLATFORMS
+    except (TypeError, ValueError):
+        platforms = ACTIVE_PLATFORMS
+
+    # Build business_info for AI generator
     business_info = {
         'name':     profile.get('name', 'Our Business'),
         'type':     profile.get('business_type', 'restaurant'),
         'location': profile.get('location', ''),
         'hours':    profile.get('hours', ''),
-        'special':  'Today\'s Special',   # TODO: pull from a specials table in a future phase
+        'special':  special.get('item_name', 'Today\'s Special'),
     }
-    tone     = profile.get('ai_tone') or 'friendly'
-    keywords = _parse_keywords(profile.get('ai_keywords', ''))
 
-    # 4. Generate per-platform captions via OpenAI
+    # Keywords from special description
+    description = special.get('description') or ''
+    keywords    = [k.strip() for k in description.split(',') if k.strip()] if description else []
+
+    # 1. Generate captions via OpenAI
     try:
         from modules.ai_generator import generate_with_adaptations
-        result  = generate_with_adaptations(
+        result   = generate_with_adaptations(
             business_info = business_info,
             content_type  = content_type,
             tone          = tone,
             keywords      = keywords,
-            platforms     = ACTIVE_PLATFORMS,
+            platforms     = platforms,
         )
         master   = result['master']
-        captions = result['adapted']   # {platform_key: text}
+        captions = result['adapted']
     except Exception as e:
-        logger.error('automation_agent: generation failed for user %s: %s', user_id, e)
-        return 'skipped'
+        logger.error('automation_agent: generation failed for special %s: %s', special_id, e)
+        return False
 
-    # 5. Calculate optimal scheduled_at timestamp
-    scheduled_at = _next_optimal_time(content_type)
+    # 2. Calculate scheduled_at from post_date + post_time
+    scheduled_at = _parse_scheduled_at(special['post_date'], special['post_time'])
+    now_ts       = int(time.time())
+    p            = placeholder
 
-    # 6. Write post_history row (status='scheduled')
+    # 3. Write post_history row
     try:
         cur = conn.cursor()
         cur.execute(
             f'INSERT INTO post_history '
-            f'(user_id, caption, content_type, platforms, status, scheduled_at, results, created_at) '
-            f'VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})',
+            f'(user_id, caption, content_type, image_url, platforms, status, scheduled_at, results, created_at) '
+            f'VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})',
             (
                 user_id,
                 master,
                 content_type,
-                json.dumps(ACTIVE_PLATFORMS),
+                image_url,
+                json.dumps(platforms),
                 'scheduled',
                 scheduled_at,
-                json.dumps({'captions': captions}),   # store per-platform captions in results
+                json.dumps({'captions': captions, 'special_id': special_id}),
                 now_ts,
             )
         )
         post_id = cur.lastrowid
         conn.commit()
-        logger.info('automation_agent: scheduled post %s for user %s at %s', post_id, user_id, scheduled_at)
+        logger.info(
+            'automation_agent: queued post %s for user %s special "%s" at %s',
+            post_id, user_id, special.get('item_name'), scheduled_at
+        )
     except Exception as e:
-        logger.error('automation_agent: failed to write post_history for user %s: %s', user_id, e)
-        return 'skipped'
+        logger.error('automation_agent: failed to write post_history for special %s: %s', special_id, e)
+        return False
 
-    # 7. Write automation_log audit row
-    _write_log(conn, user_id, post_id, content_type, tone, keywords, master, scheduled_at)
-
-    return 'scheduled'
-
-
-# ---------------------------------------------------------------------------
-# Decision logic
-# ---------------------------------------------------------------------------
-
-def _decide_content_type(conn, user_id: str) -> str:
-    """
-    Choose the next content type by rotating through CONTENT_ROTATION
-    based on what was most recently posted.
-    """
-    p = placeholder
+    # 4. Mark special as queued
     try:
-        cur = conn.cursor()
         cur.execute(
-            f'SELECT content_type FROM post_history '
-            f'WHERE user_id = {p} AND status IN (\'scheduled\', \'published\') '
-            f'ORDER BY created_at DESC LIMIT 5',
-            (user_id,)
+            f"UPDATE specials SET status = 'queued', post_history_id = {p}, updated_at = {p} "
+            f"WHERE id = {p}",
+            (post_id, now_ts, special_id)
         )
-        recent = [r[0] if not isinstance(r, dict) else r['content_type'] for r in cur.fetchall()]
-    except Exception:
-        recent = []
+        conn.commit()
+    except Exception as e:
+        logger.warning('automation_agent: failed to update special status %s: %s', special_id, e)
+        # Non-fatal: post is queued, just the status flag didn't update
 
-    # Find the last used content type and advance one step in the rotation
-    for content_type in reversed(recent):
-        if content_type in CONTENT_ROTATION:
-            idx = CONTENT_ROTATION.index(content_type)
-            return CONTENT_ROTATION[(idx + 1) % len(CONTENT_ROTATION)]
+    # 5. Write automation_log audit row
+    _write_log(conn, user_id, post_id, special_id, content_type, tone, keywords, master, scheduled_at)
 
-    return CONTENT_ROTATION[0]   # default: start with daily_special
-
-
-def _get_last_post_ts(conn, user_id: str) -> Optional[int]:
-    """Return Unix timestamp of the user's most recent post (any status)."""
-    p = placeholder
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            f'SELECT MAX(created_at) FROM post_history WHERE user_id = {p}',
-            (user_id,)
-        )
-        row = cur.fetchone()
-        val = row[0] if row else None
-        return int(val) if val else None
-    except Exception:
-        return None
-
-
-def _next_optimal_time(content_type: str) -> int:
-    """
-    Return Unix timestamp for the next optimal posting window
-    for the given content type.
-    If today's window has already passed, schedule for tomorrow.
-    """
-    opt  = OPTIMAL_SCHEDULE.get(content_type, {'hour': 12, 'minute': 0})
-    now  = datetime.utcnow()
-    target = now.replace(hour=opt['hour'], minute=opt['minute'], second=0, microsecond=0)
-    if target <= now:
-        target += timedelta(days=1)
-    return int(target.timestamp())
+    return True
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_keywords(raw: str) -> List[str]:
-    """Parse comma-separated ai_keywords string into a list."""
-    if not raw:
-        return []
-    return [k.strip() for k in raw.split(',') if k.strip()]
+def _parse_scheduled_at(post_date: str, post_time: str) -> int:
+    """
+    Parse 'YYYY-MM-DD' + 'HH:MM' -> Unix timestamp (UTC).
+    Falls back to midnight UTC if parsing fails.
+    """
+    try:
+        dt = datetime.strptime(f'{post_date} {post_time}', '%Y-%m-%d %H:%M')
+        return int(dt.replace(tzinfo=timezone.utc).timestamp())
+    except Exception:
+        try:
+            dt = datetime.strptime(post_date, '%Y-%m-%d')
+            return int(dt.replace(tzinfo=timezone.utc).timestamp())
+        except Exception:
+            return int(time.time())
 
 
 def _row_to_dict(row, keys: List[str]) -> Dict:
-    """Normalise a DB row (sqlite3.Row or psycopg2 RealDictRow) to a plain dict."""
+    """Normalise a DB row (sqlite3.Row or psycopg2 RealDictRow or tuple) to a plain dict."""
     if isinstance(row, dict):
         return dict(row)
-    return dict(zip(keys, row))
+    try:
+        return dict(row)          # sqlite3.Row supports dict()
+    except Exception:
+        return dict(zip(keys, row))
 
 
 def _write_log(
     conn,
     user_id:      str,
     post_id:      int,
+    special_id:   int,
     content_type: str,
     tone:         str,
     keywords:     List[str],
@@ -301,4 +294,4 @@ def _write_log(
         )
         conn.commit()
     except Exception as e:
-        logger.warning('automation_agent: failed to write automation_log: %s', e)
+        logger.warning('automation_agent: failed to write automation_log for special %s: %s', special_id, e)
