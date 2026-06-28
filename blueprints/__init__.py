@@ -9,6 +9,7 @@ def register_blueprints(app, csrf):
     from .api     import api_bp
     from .website import website_bp
     from .pages   import pages_bp
+    from .cron    import cron_bp
     from modules.api_manager import v1 as v1_blueprint
 
     app.register_blueprint(auth_bp)
@@ -17,8 +18,11 @@ def register_blueprints(app, csrf):
     app.register_blueprint(api_bp)
     app.register_blueprint(website_bp)
     app.register_blueprint(pages_bp)
+    app.register_blueprint(cron_bp)
     app.register_blueprint(v1_blueprint)
 
-    # Exempt the v1 API blueprint and Stripe webhook from CSRF
+    # Exempt API and webhook blueprints from CSRF
+    # cron_bp is authenticated via CRON_SECRET (HMAC), not browser sessions
     csrf.exempt(v1_blueprint)
     csrf.exempt(stripe_webhook_bp)
+    csrf.exempt(cron_bp)
