@@ -2,32 +2,49 @@
 {% block title %}Schedule — Post-Pilot{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto px-4 py-8">
+<div class="max-w-5xl mx-auto px-4 py-8">
 
   <!-- Header -->
-  <div class="flex items-center justify-between mb-8">
+  <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-2xl font-bold text-white">Post Schedule</h1>
-      <p class="text-gray-400 mt-1">Add items and the agent posts them automatically at the time you choose.</p>
+      <p class="text-gray-400 mt-1">Set your week once — the agent handles the rest.</p>
     </div>
-    <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition">
-      + Add Special
+    <button id="add-btn" onclick="openAddModal()"
+            class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition">
+      + Add
+    </button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex gap-1 mb-6 border-b border-gray-800">
+    <button onclick="switchTab('specials')" id="tab-specials"
+            class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg transition">
+      🍽 Specials
+    </button>
+    <button onclick="switchTab('events')" id="tab-events"
+            class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg transition">
+      🎉 Events
+    </button>
+    <button onclick="switchTab('hours')" id="tab-hours"
+            class="tab-btn px-4 py-2 text-sm font-medium rounded-t-lg transition">
+      🕕 Hours
     </button>
   </div>
 
   <!-- Status legend -->
-  <div class="flex gap-4 mb-6 text-sm">
-    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span> Pending</span>
-    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span> Queued</span>
-    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span> Published</span>
-    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500 inline-block"></span> Cancelled</span>
+  <div class="flex gap-4 mb-5 text-xs text-gray-400">
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-yellow-400 inline-block"></span>Pending</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span>Queued</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 inline-block"></span>Published</span>
+    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-gray-500 inline-block"></span>Cancelled</span>
   </div>
 
-  <!-- Specials table -->
-  <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="text-gray-400 border-b border-gray-800">
+  <!-- Specials tab -->
+  <div id="pane-specials" class="tab-pane">
+    <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-gray-400 border-b border-gray-800">
           <th class="text-left px-4 py-3">Item</th>
           <th class="text-left px-4 py-3">Date</th>
           <th class="text-left px-4 py-3">Time (UTC)</th>
@@ -35,99 +52,223 @@
           <th class="text-left px-4 py-3">Tone</th>
           <th class="text-left px-4 py-3">Status</th>
           <th class="text-right px-4 py-3">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="specials-tbody">
-        <tr id="empty-row">
-          <td colspan="7" class="text-center text-gray-500 py-12">No specials yet — click "+ Add Special" to start.</td>
-        </tr>
-      </tbody>
-    </table>
+        </tr></thead>
+        <tbody id="tbody-specials">
+          <tr id="empty-specials"><td colspan="7" class="text-center text-gray-500 py-10">No specials yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Events tab -->
+  <div id="pane-events" class="tab-pane hidden">
+    <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-gray-400 border-b border-gray-800">
+          <th class="text-left px-4 py-3">Event</th>
+          <th class="text-left px-4 py-3">Event Date</th>
+          <th class="text-left px-4 py-3">Post Date</th>
+          <th class="text-left px-4 py-3">Time (UTC)</th>
+          <th class="text-left px-4 py-3">Type</th>
+          <th class="text-left px-4 py-3">Status</th>
+          <th class="text-right px-4 py-3">Actions</th>
+        </tr></thead>
+        <tbody id="tbody-events">
+          <tr id="empty-events"><td colspan="7" class="text-center text-gray-500 py-10">No events yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Hours tab -->
+  <div id="pane-hours" class="tab-pane hidden">
+    <div class="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-gray-400 border-b border-gray-800">
+          <th class="text-left px-4 py-3">Title</th>
+          <th class="text-left px-4 py-3">Type</th>
+          <th class="text-left px-4 py-3">Post Date</th>
+          <th class="text-left px-4 py-3">Time (UTC)</th>
+          <th class="text-left px-4 py-3">Platforms</th>
+          <th class="text-left px-4 py-3">Status</th>
+          <th class="text-right px-4 py-3">Actions</th>
+        </tr></thead>
+        <tbody id="tbody-hours">
+          <tr id="empty-hours"><td colspan="7" class="text-center text-gray-500 py-10">No hours overrides yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
 </div>
 
-<!-- Add / Edit Modal -->
-<div id="modal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+<!-- ===== MODALS ===== -->
+
+<!-- Specials Modal -->
+<div id="modal-specials" class="modal-overlay fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
   <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6">
-    <h2 id="modal-title" class="text-lg font-bold text-white mb-5">Add Special</h2>
-
-    <form id="special-form" class="space-y-4">
-      <input type="hidden" id="edit-id" value="">
-
-      <div>
-        <label class="block text-sm text-gray-400 mb-1">Item name <span class="text-red-400">*</span></label>
-        <input id="item_name" type="text" placeholder="e.g. Truffle Burger" required
-               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-      </div>
-
-      <div>
-        <label class="block text-sm text-gray-400 mb-1">Description / keywords <span class="text-gray-600">(optional — helps AI)</span></label>
-        <input id="description" type="text" placeholder="e.g. smoked brisket, truffle aioli, limited run"
-               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-      </div>
-
+    <h2 id="modal-specials-title" class="text-lg font-bold text-white mb-5">Add Special</h2>
+    <form id="form-specials" class="space-y-4">
+      <input type="hidden" id="s-edit-id">
+      <div><label class="field-label">Item name <span class="text-red-400">*</span></label>
+        <input id="s-item_name" type="text" placeholder="e.g. Truffle Burger" required class="field-input"></div>
+      <div><label class="field-label">Description / keywords <span class="text-gray-500">(helps AI)</span></label>
+        <input id="s-description" type="text" placeholder="e.g. smoked brisket, truffle aioli" class="field-input"></div>
       <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm text-gray-400 mb-1">Date <span class="text-red-400">*</span></label>
-          <input id="post_date" type="date" required
-                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        </div>
-        <div>
-          <label class="block text-sm text-gray-400 mb-1">Time UTC <span class="text-red-400">*</span></label>
-          <input id="post_time" type="time" value="11:00" required
-                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-        </div>
+        <div><label class="field-label">Date *</label>
+          <input id="s-post_date" type="date" required class="field-input"></div>
+        <div><label class="field-label">Time UTC *</label>
+          <input id="s-post_time" type="time" value="11:00" required class="field-input"></div>
       </div>
-
       <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm text-gray-400 mb-1">Content type</label>
-          <select id="content_type" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            {% for ct in content_types %}
-            <option value="{{ ct }}">{{ ct.replace('_',' ').title() }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label class="block text-sm text-gray-400 mb-1">Tone</label>
-          <select id="tone" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            {% for t in tones %}
-            <option value="{{ t }}">{{ t.title() }}</option>
-            {% endfor %}
-          </select>
-        </div>
+        <div><label class="field-label">Content type</label>
+          <select id="s-content_type" class="field-input">
+            <option value="daily_special">Daily Special</option>
+            <option value="location">Location</option>
+            <option value="general">General</option>
+          </select></div>
+        <div><label class="field-label">Tone</label>
+          <select id="s-tone" class="field-input">
+            {% for t in tones %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
+          </select></div>
       </div>
-
-      <div>
-        <label class="block text-sm text-gray-400 mb-2">Platforms</label>
-        <div class="grid grid-cols-2 gap-2">
+      <div><label class="field-label mb-2 block">Platforms</label>
+        <div class="grid grid-cols-2 gap-2" id="s-platforms">
           {% for pl in ui_platforms %}
           <label class="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" name="platforms" value="{{ pl.key }}"
-                   class="rounded text-indigo-500 focus:ring-indigo-500"
+            <input type="checkbox" name="s-plat" value="{{ pl.key }}"
+                   class="rounded text-indigo-500"
                    {% if pl.key in ['fb','ig','tt','gb','web'] %}checked{% endif %}>
             <span class="text-sm text-gray-300">{{ pl.label }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-
-      <div>
-        <label class="block text-sm text-gray-400 mb-1">Image URL <span class="text-gray-600">(optional)</span></label>
-        <input id="image_url" type="url" placeholder="https://..."
-               class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-      </div>
-
-      <div id="form-error" class="text-red-400 text-sm hidden"></div>
-
+          </label>{% endfor %}
+        </div></div>
+      <div><label class="field-label">Image URL <span class="text-gray-500">(optional)</span></label>
+        <input id="s-image_url" type="url" placeholder="https://..." class="field-input"></div>
+      <div id="s-error" class="text-red-400 text-sm hidden"></div>
       <div class="flex gap-3 pt-2">
-        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition" id="submit-btn">Save</button>
-        <button type="button" onclick="closeModal()" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition">Cancel</button>
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition" id="s-submit">Save</button>
+        <button type="button" onclick="closeModal('modal-specials')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition">Cancel</button>
       </div>
     </form>
   </div>
 </div>
+
+<!-- Events Modal -->
+<div id="modal-events" class="modal-overlay fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6 overflow-y-auto max-h-[90vh]">
+    <h2 id="modal-events-title" class="text-lg font-bold text-white mb-5">Add Event</h2>
+    <form id="form-events" class="space-y-4">
+      <input type="hidden" id="e-edit-id">
+      <div><label class="field-label">Event title <span class="text-red-400">*</span></label>
+        <input id="e-title" type="text" placeholder="e.g. Live Jazz Night" required class="field-input"></div>
+      <div><label class="field-label">Description / keywords</label>
+        <input id="e-description" type="text" placeholder="e.g. jazz quartet, free entry, outdoor" class="field-input"></div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><label class="field-label">Event date *</label>
+          <input id="e-event_date" type="date" required class="field-input"></div>
+        <div><label class="field-label">Event end date</label>
+          <input id="e-event_end_date" type="date" class="field-input"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><label class="field-label">Post date * <span class="text-gray-500 text-xs">(when to promote)</span></label>
+          <input id="e-post_date" type="date" required class="field-input"></div>
+        <div><label class="field-label">Post time UTC *</label>
+          <input id="e-post_time" type="time" value="10:00" required class="field-input"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><label class="field-label">Event type</label>
+          <select id="e-event_type" class="field-input">
+            <option value="event">Event</option>
+            <option value="happy_hour">Happy Hour</option>
+            <option value="pop_up">Pop-Up</option>
+            <option value="concert">Concert</option>
+            <option value="market">Market</option>
+            <option value="general">General</option>
+          </select></div>
+        <div><label class="field-label">Tone</label>
+          <select id="e-tone" class="field-input">
+            {% for t in tones %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div><label class="field-label mb-2 block">Platforms</label>
+        <div class="grid grid-cols-2 gap-2">
+          {% for pl in ui_platforms %}
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" name="e-plat" value="{{ pl.key }}"
+                   class="rounded text-indigo-500"
+                   {% if pl.key in ['fb','ig','tt','gb','web'] %}checked{% endif %}>
+            <span class="text-sm text-gray-300">{{ pl.label }}</span>
+          </label>{% endfor %}
+        </div></div>
+      <div><label class="field-label">Image URL</label>
+        <input id="e-image_url" type="url" placeholder="https://..." class="field-input"></div>
+      <div><label class="field-label">Ticket / RSVP URL</label>
+        <input id="e-ticket_url" type="url" placeholder="https://..." class="field-input"></div>
+      <div id="e-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition" id="e-submit">Save</button>
+        <button type="button" onclick="closeModal('modal-events')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Hours Modal -->
+<div id="modal-hours" class="modal-overlay fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg mx-4 p-6">
+    <h2 id="modal-hours-title" class="text-lg font-bold text-white mb-5">Add Hours Override</h2>
+    <form id="form-hours" class="space-y-4">
+      <input type="hidden" id="h-edit-id">
+      <div><label class="field-label">Title <span class="text-red-400">*</span></label>
+        <input id="h-title" type="text" placeholder="e.g. Closed July 4th" required class="field-input"></div>
+      <div><label class="field-label">Details <span class="text-gray-500">(helps AI write the post)</span></label>
+        <input id="h-message" type="text" placeholder="e.g. Reopening Tuesday at 10am" class="field-input"></div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><label class="field-label">Post date *</label>
+          <input id="h-post_date" type="date" required class="field-input"></div>
+        <div><label class="field-label">Post time UTC *</label>
+          <input id="h-post_time" type="time" value="09:00" required class="field-input"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div><label class="field-label">Type</label>
+          <select id="h-override_type" class="field-input">
+            <option value="closure">Closure</option>
+            <option value="hours_change">Hours Change</option>
+            <option value="holiday">Holiday</option>
+            <option value="general">General</option>
+          </select></div>
+        <div><label class="field-label">Tone</label>
+          <select id="h-tone" class="field-input">
+            {% for t in tones %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div><label class="field-label mb-2 block">Platforms</label>
+        <div class="grid grid-cols-2 gap-2">
+          {% for pl in ui_platforms %}
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" name="h-plat" value="{{ pl.key }}"
+                   class="rounded text-indigo-500"
+                   {% if pl.key in ['fb','ig','gb','web'] %}checked{% endif %}>
+            <span class="text-sm text-gray-300">{{ pl.label }}</span>
+          </label>{% endfor %}
+        </div></div>
+      <div id="h-error" class="text-red-400 text-sm hidden"></div>
+      <div class="flex gap-3 pt-2">
+        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition" id="h-submit">Save</button>
+        <button type="button" onclick="closeModal('modal-hours')" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.field-label  { display:block; font-size:.875rem; color:#9ca3af; margin-bottom:.25rem; }
+.field-input  { width:100%; background:#1f2937; border:1px solid #374151; border-radius:.5rem;
+                padding:.5rem .75rem; color:#fff; font-size:.875rem; }
+.field-input:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 2px rgba(99,102,241,.3); }
+.tab-btn      { color:#6b7280; border-bottom:2px solid transparent; }
+.tab-btn.active { color:#fff; border-bottom-color:#6366f1; }
+</style>
 
 <script>
 const STATUS_COLORS = {
@@ -137,158 +278,268 @@ const STATUS_COLORS = {
   cancelled: 'bg-gray-500/20 text-gray-400',
 };
 
-async function loadSpecials() {
-  const res  = await fetch('/api/specials');
-  const data = await res.json();
-  if (!data.success) return;
-  renderSpecials(data.specials);
+let currentTab = 'specials';
+let cache = { specials: [], events: [], hours: [] };
+
+// ── Tabs ───────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('pane-' + tab).classList.remove('hidden');
+  document.getElementById('tab-' + tab).classList.add('active');
 }
 
-function renderSpecials(specials) {
-  const tbody = document.getElementById('specials-tbody');
-  const empty = document.getElementById('empty-row');
-  if (!specials.length) { empty.style.display = ''; return; }
-  empty.style.display = 'none';
-  // Remove old dynamic rows
-  tbody.querySelectorAll('tr[data-id]').forEach(r => r.remove());
-  specials.forEach(s => {
+function openAddModal() {
+  if (currentTab === 'specials') openSpecialsModal();
+  else if (currentTab === 'events') openEventsModal();
+  else openHoursModal();
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function badge(status) {
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[status]||'bg-gray-500/20 text-gray-400'}">${esc(status)}</span>`;
+}
+function actions(id, status, tab) {
+  const can = status === 'pending';
+  return `
+    ${can ? `<button onclick="editRow(${id},'${tab}')" class="text-indigo-400 hover:text-indigo-300 text-xs">Edit</button>` : ''}
+    ${can ? `<button onclick="cancelRow(${id},'${tab}')" class="text-yellow-500 hover:text-yellow-400 text-xs ml-2">Cancel</button>` : ''}
+    <button onclick="deleteRow(${id},'${tab}')" class="text-red-500 hover:text-red-400 text-xs ml-2">Delete</button>
+  `;
+}
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.classList.remove('hidden');
+}
+function hideErr(id) { document.getElementById(id).classList.add('hidden'); }
+
+// Close modals on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', e => { if (e.target===e.currentTarget) closeModal(m.id); });
+});
+
+// ── Load all ──────────────────────────────────────────────────────────
+async function loadAll() {
+  const [sr, er, hr] = await Promise.all([
+    fetch('/api/specials').then(r=>r.json()),
+    fetch('/api/events').then(r=>r.json()),
+    fetch('/api/hours').then(r=>r.json()),
+  ]);
+  cache.specials = sr.specials || [];
+  cache.events   = er.events   || [];
+  cache.hours    = hr.hours    || [];
+  renderSpecials(cache.specials);
+  renderEvents(cache.events);
+  renderHours(cache.hours);
+}
+
+// ── Render Specials ───────────────────────────────────────────────────
+function renderSpecials(rows) {
+  const tbody = document.getElementById('tbody-specials');
+  tbody.querySelectorAll('tr[data-id]').forEach(r=>r.remove());
+  document.getElementById('empty-specials').style.display = rows.length ? 'none' : '';
+  rows.forEach(s => {
     const tr = document.createElement('tr');
     tr.setAttribute('data-id', s.id);
     tr.className = 'border-t border-gray-800 hover:bg-gray-800/40 transition';
-    const statusCls = STATUS_COLORS[s.status] || 'bg-gray-500/20 text-gray-400';
-    const plLabels  = (s.platforms || []).join(', ');
-    const canEdit   = s.status === 'pending';
     tr.innerHTML = `
       <td class="px-4 py-3 text-white font-medium">${esc(s.item_name)}</td>
       <td class="px-4 py-3 text-gray-300">${esc(s.post_date)}</td>
       <td class="px-4 py-3 text-gray-300">${esc(s.post_time)}</td>
-      <td class="px-4 py-3 text-gray-400 text-xs">${esc(plLabels)}</td>
-      <td class="px-4 py-3 text-gray-400">${esc(s.tone || '')}</td>
-      <td class="px-4 py-3">
-        <span class="px-2 py-0.5 rounded-full text-xs font-medium ${statusCls}">${esc(s.status)}</span>
-      </td>
-      <td class="px-4 py-3 text-right space-x-2">
-        ${canEdit ? `<button onclick="openEditModal(${s.id})" class="text-indigo-400 hover:text-indigo-300 text-xs">Edit</button>` : ''}
-        ${canEdit ? `<button onclick="cancelSpecial(${s.id})" class="text-yellow-500 hover:text-yellow-400 text-xs">Cancel</button>` : ''}
-        <button onclick="deleteSpecial(${s.id})" class="text-red-500 hover:text-red-400 text-xs">Delete</button>
-      </td>
-    `;
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc((s.platforms||[]).join(', '))}</td>
+      <td class="px-4 py-3 text-gray-400">${esc(s.tone||'')}</td>
+      <td class="px-4 py-3">${badge(s.status)}</td>
+      <td class="px-4 py-3 text-right">${actions(s.id,s.status,'specials')}</td>`;
     tbody.appendChild(tr);
   });
 }
 
-function esc(s) {
-  return String(s || '')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// ── Modal helpers ──────────────────────────────────────────────────────────
-
-function openModal(data = {}) {
-  document.getElementById('modal').classList.remove('hidden');
-  document.getElementById('modal-title').textContent = data.id ? 'Edit Special' : 'Add Special';
-  document.getElementById('edit-id').value        = data.id || '';
-  document.getElementById('item_name').value      = data.item_name || '';
-  document.getElementById('description').value    = data.description || '';
-  document.getElementById('post_date').value      = data.post_date || '';
-  document.getElementById('post_time').value      = data.post_time || '11:00';
-  document.getElementById('content_type').value  = data.content_type || 'daily_special';
-  document.getElementById('tone').value          = data.tone || 'friendly';
-  document.getElementById('image_url').value     = data.image_url || '';
-  // Set platform checkboxes
-  const activePlatforms = data.platforms || ['fb','ig','tt','gb','web'];
-  document.querySelectorAll('input[name="platforms"]').forEach(cb => {
-    cb.checked = activePlatforms.includes(cb.value);
+// ── Render Events ──────────────────────────────────────────────────────
+function renderEvents(rows) {
+  const tbody = document.getElementById('tbody-events');
+  tbody.querySelectorAll('tr[data-id]').forEach(r=>r.remove());
+  document.getElementById('empty-events').style.display = rows.length ? 'none' : '';
+  rows.forEach(ev => {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-id', ev.id);
+    tr.className = 'border-t border-gray-800 hover:bg-gray-800/40 transition';
+    tr.innerHTML = `
+      <td class="px-4 py-3 text-white font-medium">${esc(ev.title)}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(ev.event_date)}${ev.event_end_date?'<br><span class="text-xs text-gray-500">to '+esc(ev.event_end_date)+'</span>':''}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(ev.post_date)}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(ev.post_time)}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc(ev.event_type||'')}</td>
+      <td class="px-4 py-3">${badge(ev.status)}</td>
+      <td class="px-4 py-3 text-right">${actions(ev.id,ev.status,'events')}</td>`;
+    tbody.appendChild(tr);
   });
-  document.getElementById('form-error').classList.add('hidden');
 }
 
-function closeModal() {
-  document.getElementById('modal').classList.add('hidden');
+// ── Render Hours ───────────────────────────────────────────────────────
+function renderHours(rows) {
+  const tbody = document.getElementById('tbody-hours');
+  tbody.querySelectorAll('tr[data-id]').forEach(r=>r.remove());
+  document.getElementById('empty-hours').style.display = rows.length ? 'none' : '';
+  rows.forEach(h => {
+    const tr = document.createElement('tr');
+    tr.setAttribute('data-id', h.id);
+    tr.className = 'border-t border-gray-800 hover:bg-gray-800/40 transition';
+    tr.innerHTML = `
+      <td class="px-4 py-3 text-white font-medium">${esc(h.title)}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc(h.override_type||'')}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(h.post_date)}</td>
+      <td class="px-4 py-3 text-gray-300">${esc(h.post_time)}</td>
+      <td class="px-4 py-3 text-gray-400 text-xs">${esc((h.platforms||[]).join(', '))}</td>
+      <td class="px-4 py-3">${badge(h.status)}</td>
+      <td class="px-4 py-3 text-right">${actions(h.id,h.status,'hours')}</td>`;
+    tbody.appendChild(tr);
+  });
 }
 
-async function openEditModal(id) {
-  const res  = await fetch('/api/specials');
-  const data = await res.json();
-  const s    = (data.specials || []).find(x => x.id === id);
-  if (s) openModal(s);
+// ── Modal openers ───────────────────────────────────────────────────────
+function openSpecialsModal(d={}) {
+  document.getElementById('modal-specials-title').textContent = d.id ? 'Edit Special' : 'Add Special';
+  document.getElementById('s-edit-id').value       = d.id||'';
+  document.getElementById('s-item_name').value     = d.item_name||'';
+  document.getElementById('s-description').value   = d.description||'';
+  document.getElementById('s-post_date').value     = d.post_date||'';
+  document.getElementById('s-post_time').value     = d.post_time||'11:00';
+  document.getElementById('s-content_type').value  = d.content_type||'daily_special';
+  document.getElementById('s-tone').value          = d.tone||'friendly';
+  document.getElementById('s-image_url').value     = d.image_url||'';
+  const active = d.platforms||['fb','ig','tt','gb','web'];
+  document.querySelectorAll('input[name="s-plat"]').forEach(cb=>cb.checked=active.includes(cb.value));
+  hideErr('s-error');
+  document.getElementById('modal-specials').classList.remove('hidden');
+}
+function openEventsModal(d={}) {
+  document.getElementById('modal-events-title').textContent = d.id ? 'Edit Event' : 'Add Event';
+  document.getElementById('e-edit-id').value          = d.id||'';
+  document.getElementById('e-title').value            = d.title||'';
+  document.getElementById('e-description').value      = d.description||'';
+  document.getElementById('e-event_date').value       = d.event_date||'';
+  document.getElementById('e-event_end_date').value   = d.event_end_date||'';
+  document.getElementById('e-post_date').value        = d.post_date||'';
+  document.getElementById('e-post_time').value        = d.post_time||'10:00';
+  document.getElementById('e-event_type').value       = d.event_type||'event';
+  document.getElementById('e-tone').value             = d.tone||'hype';
+  document.getElementById('e-image_url').value        = d.image_url||'';
+  document.getElementById('e-ticket_url').value       = d.ticket_url||'';
+  const active = d.platforms||['fb','ig','tt','gb','web'];
+  document.querySelectorAll('input[name="e-plat"]').forEach(cb=>cb.checked=active.includes(cb.value));
+  hideErr('e-error');
+  document.getElementById('modal-events').classList.remove('hidden');
+}
+function openHoursModal(d={}) {
+  document.getElementById('modal-hours-title').textContent = d.id ? 'Edit Hours Override' : 'Add Hours Override';
+  document.getElementById('h-edit-id').value        = d.id||'';
+  document.getElementById('h-title').value          = d.title||'';
+  document.getElementById('h-message').value        = d.message||'';
+  document.getElementById('h-post_date').value      = d.post_date||'';
+  document.getElementById('h-post_time').value      = d.post_time||'09:00';
+  document.getElementById('h-override_type').value  = d.override_type||'closure';
+  document.getElementById('h-tone').value           = d.tone||'friendly';
+  const active = d.platforms||['fb','ig','gb','web'];
+  document.querySelectorAll('input[name="h-plat"]').forEach(cb=>cb.checked=active.includes(cb.value));
+  hideErr('h-error');
+  document.getElementById('modal-hours').classList.remove('hidden');
 }
 
-// ── Form submit ────────────────────────────────────────────────────────────
+// ── Edit row ─────────────────────────────────────────────────────────────
+function editRow(id, tab) {
+  if (tab==='specials') { const d=cache.specials.find(x=>x.id===id); if(d) openSpecialsModal(d); }
+  else if (tab==='events') { const d=cache.events.find(x=>x.id===id); if(d) openEventsModal(d); }
+  else { const d=cache.hours.find(x=>x.id===id); if(d) openHoursModal(d); }
+}
 
-document.getElementById('special-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const errEl = document.getElementById('form-error');
-  errEl.classList.add('hidden');
+// ── Delete / Cancel ───────────────────────────────────────────────────
+async function deleteRow(id, tab) {
+  if (!confirm('Delete this item? Cannot be undone.')) return;
+  const urls = {specials:`/api/specials/${id}`,events:`/api/events/${id}`,hours:`/api/hours/${id}`};
+  const res = await fetch(urls[tab], {method:'DELETE'});
+  if ((await res.json()).success) loadAll();
+}
+async function cancelRow(id, tab) {
+  if (!confirm('Cancel this item? The agent will skip it.')) return;
+  const urls = {specials:`/api/specials/${id}/cancel`,events:`/api/events/${id}/cancel`,hours:`/api/hours/${id}/cancel`};
+  const res = await fetch(urls[tab], {method:'POST'});
+  if ((await res.json()).success) loadAll();
+}
 
-  const platforms = Array.from(
-    document.querySelectorAll('input[name="platforms"]:checked')
-  ).map(cb => cb.value);
-
-  if (!platforms.length) {
-    errEl.textContent = 'Select at least one platform.';
-    errEl.classList.remove('hidden');
-    return;
-  }
-
-  const payload = {
-    item_name:    document.getElementById('item_name').value.trim(),
-    description:  document.getElementById('description').value.trim(),
-    post_date:    document.getElementById('post_date').value,
-    post_time:    document.getElementById('post_time').value,
-    content_type: document.getElementById('content_type').value,
-    tone:         document.getElementById('tone').value,
-    image_url:    document.getElementById('image_url').value.trim() || null,
-    platforms,
-  };
-
-  const editId = document.getElementById('edit-id').value;
-  const url    = editId ? `/api/specials/${editId}` : '/api/specials';
+// ── Form submit helpers ─────────────────────────────────────────────────
+async function submitForm(payload, editId, baseUrl, errId, submitId, modalId) {
+  const url    = editId ? `${baseUrl}/${editId}` : baseUrl;
   const method = editId ? 'PUT' : 'POST';
-
-  document.getElementById('submit-btn').textContent = 'Saving...';
+  document.getElementById(submitId).textContent = 'Saving…';
   try {
-    const res  = await fetch(url, {
-      method,
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify(payload),
-    });
+    const res  = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     const data = await res.json();
-    if (data.success) {
-      closeModal();
-      loadSpecials();
-    } else {
-      errEl.textContent = (data.errors || [data.error]).join(' ');
-      errEl.classList.remove('hidden');
-    }
-  } catch (err) {
-    errEl.textContent = 'Network error — please try again.';
-    errEl.classList.remove('hidden');
-  } finally {
-    document.getElementById('submit-btn').textContent = 'Save';
-  }
-});
-
-// ── Delete / Cancel ────────────────────────────────────────────────────────
-
-async function deleteSpecial(id) {
-  if (!confirm('Delete this special? This cannot be undone.')) return;
-  const res = await fetch(`/api/specials/${id}`, { method: 'DELETE' });
-  if ((await res.json()).success) loadSpecials();
+    if (data.success) { closeModal(modalId); loadAll(); }
+    else showErr(errId, (data.errors||[data.error]).join(' '));
+  } catch { showErr(errId, 'Network error — please try again.'); }
+  finally  { document.getElementById(submitId).textContent = 'Save'; }
 }
 
-async function cancelSpecial(id) {
-  if (!confirm('Cancel this special? The agent will skip it.')) return;
-  const res = await fetch(`/api/specials/${id}/cancel`, { method: 'POST' });
-  if ((await res.json()).success) loadSpecials();
-}
-
-// Close modal on backdrop click
-document.getElementById('modal').addEventListener('click', (e) => {
-  if (e.target === e.currentTarget) closeModal();
+// Specials form
+document.getElementById('form-specials').addEventListener('submit', async e => {
+  e.preventDefault();
+  const platforms = [...document.querySelectorAll('input[name="s-plat"]:checked')].map(c=>c.value);
+  if (!platforms.length) { showErr('s-error','Select at least one platform.'); return; }
+  submitForm({
+    item_name:    document.getElementById('s-item_name').value.trim(),
+    description:  document.getElementById('s-description').value.trim(),
+    post_date:    document.getElementById('s-post_date').value,
+    post_time:    document.getElementById('s-post_time').value,
+    content_type: document.getElementById('s-content_type').value,
+    tone:         document.getElementById('s-tone').value,
+    image_url:    document.getElementById('s-image_url').value.trim()||null,
+    platforms,
+  }, document.getElementById('s-edit-id').value, '/api/specials', 's-error', 's-submit', 'modal-specials');
 });
 
-// Initial load
-loadSpecials();
+// Events form
+document.getElementById('form-events').addEventListener('submit', async e => {
+  e.preventDefault();
+  const platforms = [...document.querySelectorAll('input[name="e-plat"]:checked')].map(c=>c.value);
+  if (!platforms.length) { showErr('e-error','Select at least one platform.'); return; }
+  submitForm({
+    title:          document.getElementById('e-title').value.trim(),
+    description:    document.getElementById('e-description').value.trim(),
+    event_date:     document.getElementById('e-event_date').value,
+    event_end_date: document.getElementById('e-event_end_date').value||null,
+    post_date:      document.getElementById('e-post_date').value,
+    post_time:      document.getElementById('e-post_time').value,
+    event_type:     document.getElementById('e-event_type').value,
+    tone:           document.getElementById('e-tone').value,
+    image_url:      document.getElementById('e-image_url').value.trim()||null,
+    ticket_url:     document.getElementById('e-ticket_url').value.trim()||null,
+    platforms,
+  }, document.getElementById('e-edit-id').value, '/api/events', 'e-error', 'e-submit', 'modal-events');
+});
+
+// Hours form
+document.getElementById('form-hours').addEventListener('submit', async e => {
+  e.preventDefault();
+  const platforms = [...document.querySelectorAll('input[name="h-plat"]:checked')].map(c=>c.value);
+  if (!platforms.length) { showErr('h-error','Select at least one platform.'); return; }
+  submitForm({
+    title:         document.getElementById('h-title').value.trim(),
+    message:       document.getElementById('h-message').value.trim(),
+    post_date:     document.getElementById('h-post_date').value,
+    post_time:     document.getElementById('h-post_time').value,
+    override_type: document.getElementById('h-override_type').value,
+    tone:          document.getElementById('h-tone').value,
+    platforms,
+  }, document.getElementById('h-edit-id').value, '/api/hours', 'h-error', 'h-submit', 'modal-hours');
+});
+
+// Init
+switchTab('specials');
+loadAll();
 </script>
 {% endblock %}

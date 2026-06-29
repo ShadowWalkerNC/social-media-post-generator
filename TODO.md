@@ -1,119 +1,101 @@
 # Post-Pilot — Task List
-*Last updated: 2026-06-28 — UPA session (specials table + schedule UI + agent rewrite)*
+*Last updated: 2026-06-28 — Phase 1 complete*
 
 Priority levels: 🔴 Critical (stop-ship) · 🟠 High · 🟡 Medium · 🟢 Low
 
 ---
 
-## 🔴 CRITICAL — Manual Steps Required (You Must Do These)
+## 🔴 CRITICAL — You Must Do These Manually
 
-### SEC-1 · Rotate TOKEN_ENCRYPTION_KEY
-- [x] `.gitignore` created — `.env`, `*.db`, `.venv/`, `__pycache__/` covered
-- [x] `.env` replaced with safe placeholders
-- [ ] **Generate new Fernet key locally:**
-  ```bash
-  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-  ```
-- [ ] **Update `TOKEN_ENCRYPTION_KEY` in Vercel environment variables**
-- [ ] **Update `FLASK_SECRET_KEY` in Vercel environment variables**
-- [ ] **Re-encrypt existing `platform_tokens` rows** (write one-time migration if real tokens exist)
+### SEC-1 · Rotate encryption keys
+- [ ] `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+- [ ] Update `TOKEN_ENCRYPTION_KEY` in Vercel env vars
+- [ ] Update `FLASK_SECRET_KEY` in Vercel env vars
+- [ ] Re-encrypt any existing `platform_tokens` rows
 
-### SEC-2 · Remove binary files from git tracking (run locally)
-- [ ] **Run locally and push:**
-  ```bash
-  git rm --cached postpilot.db .venv __pycache__ -r --ignore-unmatch
-  git commit -m "chore: untrack .db, .venv, __pycache__"
-  git push
-  ```
-
-### SEC-3 · Confirm /dev-login is disabled in production
-- [ ] **Confirm `DEV_LOGIN_KEY` is absent or empty in Vercel production env vars**
-
----
-
-## 🟠 HIGH PRIORITY
-
-### INFRA-1 · Confirm production redeploy is live
-- [ ] Trigger fresh Vercel redeploy after rotating keys
-- [ ] Smoke test: visit `/login`, request magic link
-- [ ] Check Vercel Cron tab — confirm both `/api/cron/generate` and `/api/cron/publish` are listed
-
-### INFRA-2 · Add Redis for real rate limiting
-- [ ] Provision Upstash Redis (free tier — https://upstash.com)
-- [ ] Add `REDIS_URL` to Vercel environment variables
-
-### INFRA-6 · Scheduler — Vercel Cron
-- [x] `/api/cron/publish` — every minute
-- [x] `/api/cron/generate` — every hour → calls AutomationAgent
-- [x] `vercel.json` updated — both cron jobs registered
-- [ ] **Add `CRON_SECRET` to Vercel environment variables:**
-  ```bash
-  python -c "import secrets; print(secrets.token_urlsafe(32))"
-  ```
-
-### INFRA-7 · Automation Agent
-- [x] `modules/automation_agent.py` — reads specials table, generates per-platform captions, queues post_history rows
-- [x] `alembic/versions/0004_automation_log.py` — audit trail table
-- [x] `alembic/versions/0005_specials.py` — specials table
-- [x] `blueprints/specials.py` — full CRUD API + /schedule page route
-- [x] `templates/schedule.html` — schedule management UI
-- [ ] **Register `specials_bp` in `blueprints/__init__.py`** (see below)
-- [ ] **Apply migrations:** `alembic upgrade head` (runs 0003, 0004, 0005)
-- [ ] **Add `OPENAI_API_KEY` to Vercel environment variables**
-- [ ] **Add `CRON_SECRET` to Vercel environment variables**
-- [ ] **Add `/schedule` link to dashboard sidebar nav**
-- [ ] Test: add a special via UI, POST `/api/cron/generate`, confirm post_history row created
-
-### REGISTER specials_bp
-Add to `blueprints/__init__.py`:
-```python
-from blueprints.specials import specials_bp
-app.register_blueprint(specials_bp)
-# also add to CSRF exempt list if using flask-wtf
+### SEC-2 · Remove binary files from git
+```bash
+git rm --cached postpilot.db .venv __pycache__ -r --ignore-unmatch
+git commit -m "chore: untrack .db, .venv, __pycache__"
+git push
 ```
 
----
-
-## 🟡 MEDIUM PRIORITY
-
-### AUTOMATION-2 · Agent activity dashboard
-- [ ] `/dashboard/automation` page — show `automation_log` rows for current user
-- [ ] Display: content_type, tone, scheduled_at, master_caption preview, status
-
-### DEV-1 · CI pipeline
-- [ ] Add `CI_TOKEN_ENCRYPTION_KEY` to GitHub Actions secrets
-
-### DEV-2 · Error monitoring
-- [ ] Sign up at https://sentry.io, add `SENTRY_DSN` to Vercel
-
-### DB-1 · Drop password_hash
-- [x] Migration `0003_drop_password_hash.py` written
-- [ ] `alembic upgrade head`
+### SEC-3 · Disable dev login in production
+- [ ] Confirm `DEV_LOGIN_KEY` is absent or empty in Vercel production env vars
 
 ---
 
-## 🟢 LOW PRIORITY
+## 🟠 HIGH — Pending Manual Steps
 
-### PERF-1 · Caching layer
-- [ ] Add Redis-backed caching for 3 most-called DB queries
+### INFRA · Env vars to add to Vercel
+- [ ] `OPENAI_API_KEY`
+- [ ] `CRON_SECRET` — `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+- [ ] `STRIPE_PRICE_STARTER_MONTHLY` / `STRIPE_PRICE_STARTER_ANNUAL`
+- [ ] `STRIPE_PRICE_PRO_MONTHLY` / `STRIPE_PRICE_PRO_ANNUAL`
+- [ ] `STRIPE_PRICE_AGENCY_MONTHLY` / `STRIPE_PRICE_AGENCY_ANNUAL`
+- [ ] `REDIS_URL` — provision free Upstash Redis at https://upstash.com
 
-### OPS-1 · Structured logging
-- [ ] Replace `print()` statements with `app.logger` calls
+### INFRA · After pushing
+- [ ] Run `alembic upgrade head` — applies migrations 0003 through 0006
+- [ ] Trigger fresh Vercel redeploy
+- [ ] Smoke test: `/login` → magic link → `/schedule` → add a special → POST `/api/cron/generate` → confirm `post_history` row created
+- [ ] Add `/schedule` link to dashboard sidebar nav
 
-### UX-1 · Favicon
-- [ ] Add `favicon.ico` to `static/` and `<link rel="icon">` to `base.html`
+---
+
+## 🟠 HIGH — Phase 2: Website Embed
+
+- [ ] `alembic/0007_business_slug.py` — add `slug` to `business_profiles`
+- [ ] Onboarding step: choose/confirm slug (auto-generated from business name, user can edit once)
+- [ ] `blueprints/embed.py` — `GET /api/public/<slug>/feed` → public JSON (no auth required)
+- [ ] `static/embed.js` — 10-line drop-in script for any website
+- [ ] `templates/embed_preview.html` — live preview + copy embed code in dashboard
+
+---
+
+## 🟠 HIGH — Phase 3: Inbox
+
+- [ ] `alembic/0008_inbox.py` — `inbox_items` table
+- [ ] `modules/comment_poller.py` — polls FB + IG Graph API for new comments on recent posts
+- [ ] `modules/reply_agent.py` — generates AI draft reply per comment, tone-matched to business
+- [ ] `blueprints/inbox.py` — list inbox, approve / edit / reject
+- [ ] `templates/inbox.html` — comment feed + Approve / Edit / Skip buttons
+- [ ] `vercel.json` — add `/api/cron/poll_comments` every 15 min
+
+---
+
+## 🟡 MEDIUM
+
+- [ ] Stripe webhook handler (`/billing/webhook`) — sync subscription tier on payment events
+- [ ] Agent activity log page (`/dashboard/automation`) — show `automation_log` rows
+- [ ] `check_post_limit()` wired into `api_publish` and `api_push_all`
+- [ ] CI pipeline — add `CI_TOKEN_ENCRYPTION_KEY` to GitHub Actions secrets
+- [ ] Sentry — sign up at https://sentry.io, add `SENTRY_DSN` to Vercel
+
+---
+
+## 🟢 LOW
+
+- [ ] Redis-backed caching for hot DB queries
+- [ ] Replace `print()` with `app.logger` calls
+- [ ] Favicon (`static/favicon.ico`)
+- [ ] Mobile-responsive dashboard nav
+- [ ] Bulk reschedule / drag-and-drop calendar view
 
 ---
 
 ## ✅ COMPLETED
 
-- [x] AUTOMATION-1: `specials` table migration + CRUD blueprint + schedule UI
-- [x] AUTOMATION-1: `automation_agent.py` rewritten — reads specials, no more invented content
-- [x] INFRA-7: `automation_agent.py` v1 — original agent loop + automation_log table
+- [x] PHASE 1: Events table + CRUD blueprint (`blueprints/events.py`)
+- [x] PHASE 1: Hours overrides table + CRUD blueprint (`blueprints/hours.py`)
+- [x] PHASE 1: Migration `0006_events_hours.py` — `events` + `hours_overrides` tables
+- [x] PHASE 1: `automation_agent.py` v3 — reads specials + events + hours
+- [x] PHASE 1: `schedule.html` — tabbed UI (Specials / Events / Hours) with per-tab modals
+- [x] PHASE 1: `blueprints/__init__.py` — registers specials_bp, events_bp, hours_bp + CSRF exemptions
+- [x] BILLING-1: `plan_guard.py` — Free/Starter/Pro/Agency tiers, post/platform/location limits
+- [x] BILLING-1: `billing.html` — correct prices, monthly/annual toggle, annual totals
+- [x] AUTOMATION-1: `specials` table + CRUD + agent v2
 - [x] INFRA-6: Vercel Cron — `/api/cron/generate` (hourly) + `/api/cron/publish` (every minute)
-- [x] Publisher: LinkedIn and Pinterest stubs removed
-- [x] Publisher: `_update_website` fixed — writes to DB instead of ephemeral filesystem
-- [x] Publisher: `timeout=15` added to all `requests` calls
-- [x] DB-1: `0003_drop_password_hash.py` written
-- [x] Sentry, CI, CORS, `/dev-login` guard, OAuth state namespacing, XSS fix
-- [x] `AGENTS.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`, `README.md` all written
+- [x] Publisher: `_update_website` fixed, timeout=15, LinkedIn/Pinterest stubs removed
+- [x] Security: `.gitignore`, `.env` placeholders, `/dev-login` guard, XSS fix, CORS, OAuth state
+- [x] Docs: `AGENTS.md`, `ARCHITECTURE.md`, `DEVELOPMENT.md`, `README.md`

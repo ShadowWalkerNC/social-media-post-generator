@@ -1,26 +1,27 @@
 """
 modules/automation_agent.py
-Post-Pilot Autonomous Content Agent  (v2 -- specials-driven)
+Post-Pilot Autonomous Content Agent  (v3 -- specials + events + hours)
 
 The agent runs every hour via Vercel Cron -> POST /api/cron/generate.
-Instead of inventing content, it reads the user's specials table and
-generates posts for any items scheduled for today that are still pending.
+It reads all three schedule tables and queues posts for anything due today
+that is still pending.
 
-Flow:
-  1. For each user with a completed business profile:
-  2. Query specials WHERE post_date = today AND status = 'pending'
-  3. For each due special:
-       a. Generate per-platform captions via OpenAI (master + adapt)
-       b. Parse post_time -> Unix timestamp for scheduled_at
-       c. Write post_history row (status='scheduled')
-       d. Update special.status = 'queued', special.post_history_id = <id>
-       e. Write automation_log audit row
+Queue order (all run for today):
+  1. specials       -- daily specials (food/drink/product)
+  2. events         -- event promos (concerts, happy hours, pop-ups)
+  3. hours_overrides-- hours/closure announcements
 
-The cron job at /api/cron/publish (every minute) picks up the scheduled
-post_history rows and pushes them live via UniversalPublisher.
+For each item:
+  a. Generate per-platform captions via OpenAI
+  b. Parse post_time -> Unix timestamp
+  c. Write post_history row (status='scheduled')
+  d. Mark source row status='queued'
+  e. Write automation_log audit row
 
-Active platforms: fb, ig, tt, yt, yts, tw, gb, web
-(LinkedIn and Pinterest excluded until publishers are implemented)
+Content-type mapping:
+  specials       -> content_type from row (default 'daily_special')
+  events         -> event_type from row   (default 'event')
+  hours_overrides-> override_type from row (default 'hours_update')
 """
 
 import json
@@ -33,7 +34,6 @@ from modules.db import get_connection, placeholder
 
 logger = logging.getLogger(__name__)
 
-# Platforms the agent will generate content for.
 ACTIVE_PLATFORMS: List[str] = ['fb', 'ig', 'tt', 'yt', 'yts', 'tw', 'gb', 'web']
 
 
@@ -42,13 +42,6 @@ ACTIVE_PLATFORMS: List[str] = ['fb', 'ig', 'tt', 'yt', 'yts', 'tw', 'gb', 'web']
 # ---------------------------------------------------------------------------
 
 def run_for_all_users() -> Dict:
-    """
-    Entry point called by POST /api/cron/generate.
-    Iterates all users with complete business profiles and queues any
-    specials due today that are still pending.
-
-    Returns a summary dict for the cron endpoint to log/return.
-    """
     conn    = get_connection()
     today   = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     summary = {'processed': 0, 'queued': 0, 'skipped': 0, 'errors': 0}
@@ -57,8 +50,7 @@ def run_for_all_users() -> Dict:
         cur = conn.cursor()
         cur.execute(
             "SELECT user_id, name, business_type, location, hours, ai_tone "
-            "FROM business_profiles "
-            "WHERE name IS NOT NULL AND name != ''"
+            "FROM business_profiles WHERE name IS NOT NULL AND name != ''"
         )
         users = cur.fetchall()
     except Exception as e:
@@ -87,84 +79,179 @@ def run_for_all_users() -> Dict:
 # ---------------------------------------------------------------------------
 
 def _process_user(conn, profile: Dict, today: str) -> int:
-    """
-    Queue all pending specials for today for a single user.
-    Returns the number of posts queued.
-    """
+    user_id = profile['user_id']
+    queued  = 0
+    queued += _process_specials(conn, profile, today)
+    queued += _process_events(conn, profile, today)
+    queued += _process_hours(conn, profile, today)
+    return queued
+
+
+# ---------------------------------------------------------------------------
+# Specials
+# ---------------------------------------------------------------------------
+
+def _process_specials(conn, profile: Dict, today: str) -> int:
     user_id = profile['user_id']
     p       = placeholder
-    queued  = 0
-
-    # Load all pending specials due today
     try:
         cur = conn.cursor()
         cur.execute(
             f"SELECT id, item_name, description, post_date, post_time, "
             f"platforms, content_type, tone, image_url "
-            f"FROM specials "
-            f"WHERE user_id = {p} AND post_date = {p} AND status = 'pending'",
+            f"FROM specials WHERE user_id={p} AND post_date={p} AND status='pending'",
             (user_id, today)
         )
-        specials = cur.fetchall()
+        rows = cur.fetchall()
     except Exception as e:
-        logger.error('automation_agent: failed to load specials for user %s: %s', user_id, e)
+        logger.error('agent specials query failed user %s: %s', user_id, e)
         return 0
 
-    if not specials:
-        logger.info('automation_agent: no pending specials today for user %s', user_id)
-        return 0
-
-    for row in specials:
-        special = _row_to_dict(row, [
-            'id', 'item_name', 'description', 'post_date', 'post_time',
-            'platforms', 'content_type', 'tone', 'image_url',
-        ])
-        try:
-            ok = _queue_special(conn, profile, special)
-            if ok:
-                queued += 1
-        except Exception as e:
-            logger.error(
-                'automation_agent: failed to queue special %s for user %s: %s',
-                special.get('id'), user_id, e
-            )
-
+    queued = 0
+    for row in rows:
+        s = _row_to_dict(row, ['id','item_name','description','post_date','post_time',
+                               'platforms','content_type','tone','image_url'])
+        business_info = _build_business_info(profile, extra={'special': s.get('item_name','')})
+        keywords      = _keywords_from(s.get('description'))
+        platforms     = _parse_platforms(s.get('platforms'))
+        content_type  = s.get('content_type') or 'daily_special'
+        tone          = s.get('tone') or profile.get('ai_tone') or 'friendly'
+        ok = _queue_item(
+            conn, profile, s['id'], 'specials',
+            title        = s.get('item_name', 'Today\'s Special'),
+            business_info= business_info,
+            content_type = content_type,
+            tone         = tone,
+            keywords     = keywords,
+            platforms    = platforms,
+            post_date    = s['post_date'],
+            post_time    = s['post_time'],
+            image_url    = s.get('image_url'),
+        )
+        if ok: queued += 1
     return queued
 
 
-def _queue_special(conn, profile: Dict, special: Dict) -> bool:
-    """
-    Generate captions for one special and write a post_history row.
-    Marks the special as 'queued' on success.
-    Returns True on success.
-    """
-    user_id      = profile['user_id']
-    special_id   = special['id']
-    content_type = special.get('content_type') or 'daily_special'
-    tone         = special.get('tone') or profile.get('ai_tone') or 'friendly'
-    image_url    = special.get('image_url')
+# ---------------------------------------------------------------------------
+# Events
+# ---------------------------------------------------------------------------
 
-    # Resolve platforms: use special-level override or fall back to ACTIVE_PLATFORMS
-    platforms_raw = special.get('platforms')
+def _process_events(conn, profile: Dict, today: str) -> int:
+    user_id = profile['user_id']
+    p       = placeholder
     try:
-        platforms = json.loads(platforms_raw) if platforms_raw else ACTIVE_PLATFORMS
-    except (TypeError, ValueError):
-        platforms = ACTIVE_PLATFORMS
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, title, description, event_date, post_date, post_time, "
+            f"event_type, platforms, tone, image_url, ticket_url "
+            f"FROM events WHERE user_id={p} AND post_date={p} AND status='pending'",
+            (user_id, today)
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        logger.error('agent events query failed user %s: %s', user_id, e)
+        return 0
 
-    # Build business_info for AI generator
-    business_info = {
-        'name':     profile.get('name', 'Our Business'),
-        'type':     profile.get('business_type', 'restaurant'),
-        'location': profile.get('location', ''),
-        'hours':    profile.get('hours', ''),
-        'special':  special.get('item_name', 'Today\'s Special'),
-    }
+    queued = 0
+    for row in rows:
+        ev = _row_to_dict(row, ['id','title','description','event_date','post_date','post_time',
+                                'event_type','platforms','tone','image_url','ticket_url'])
+        desc = ev.get('description') or ''
+        if ev.get('ticket_url'):
+            desc = (desc + f' Tickets: {ev["ticket_url"]}').strip()
+        business_info = _build_business_info(
+            profile,
+            extra={'event': ev.get('title',''), 'event_date': ev.get('event_date','')}
+        )
+        keywords     = _keywords_from(desc)
+        platforms    = _parse_platforms(ev.get('platforms'))
+        content_type = ev.get('event_type') or 'event'
+        tone         = ev.get('tone') or profile.get('ai_tone') or 'hype'
+        ok = _queue_item(
+            conn, profile, ev['id'], 'events',
+            title        = ev.get('title', 'Upcoming Event'),
+            business_info= business_info,
+            content_type = content_type,
+            tone         = tone,
+            keywords     = keywords,
+            platforms    = platforms,
+            post_date    = ev['post_date'],
+            post_time    = ev['post_time'],
+            image_url    = ev.get('image_url'),
+        )
+        if ok: queued += 1
+    return queued
 
-    # Keywords from special description
-    description = special.get('description') or ''
-    keywords    = [k.strip() for k in description.split(',') if k.strip()] if description else []
 
-    # 1. Generate captions via OpenAI
+# ---------------------------------------------------------------------------
+# Hours overrides
+# ---------------------------------------------------------------------------
+
+def _process_hours(conn, profile: Dict, today: str) -> int:
+    user_id = profile['user_id']
+    p       = placeholder
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, title, message, override_type, post_date, post_time, platforms, tone "
+            f"FROM hours_overrides WHERE user_id={p} AND post_date={p} AND status='pending'",
+            (user_id, today)
+        )
+        rows = cur.fetchall()
+    except Exception as e:
+        logger.error('agent hours query failed user %s: %s', user_id, e)
+        return 0
+
+    queued = 0
+    for row in rows:
+        h = _row_to_dict(row, ['id','title','message','override_type','post_date','post_time','platforms','tone'])
+        business_info = _build_business_info(
+            profile,
+            extra={'hours_update': h.get('title',''), 'detail': h.get('message','')}
+        )
+        keywords     = _keywords_from(h.get('message'))
+        platforms    = _parse_platforms(h.get('platforms'))
+        content_type = h.get('override_type') or 'hours_update'
+        tone         = h.get('tone') or profile.get('ai_tone') or 'friendly'
+        ok = _queue_item(
+            conn, profile, h['id'], 'hours_overrides',
+            title        = h.get('title', 'Hours Update'),
+            business_info= business_info,
+            content_type = content_type,
+            tone         = tone,
+            keywords     = keywords,
+            platforms    = platforms,
+            post_date    = h['post_date'],
+            post_time    = h['post_time'],
+            image_url    = None,
+        )
+        if ok: queued += 1
+    return queued
+
+
+# ---------------------------------------------------------------------------
+# Shared queue writer
+# ---------------------------------------------------------------------------
+
+def _queue_item(
+    conn,
+    profile:      Dict,
+    source_id:    int,
+    source_table: str,
+    title:        str,
+    business_info:Dict,
+    content_type: str,
+    tone:         str,
+    keywords:     List[str],
+    platforms:    List[str],
+    post_date:    str,
+    post_time:    str,
+    image_url:    Optional[str],
+) -> bool:
+    user_id = profile['user_id']
+    p       = placeholder
+
+    # 1. Generate captions
     try:
         from modules.ai_generator import generate_with_adaptations
         result   = generate_with_adaptations(
@@ -177,58 +264,46 @@ def _queue_special(conn, profile: Dict, special: Dict) -> bool:
         master   = result['master']
         captions = result['adapted']
     except Exception as e:
-        logger.error('automation_agent: generation failed for special %s: %s', special_id, e)
+        logger.error('agent generation failed for %s#%s: %s', source_table, source_id, e)
         return False
 
-    # 2. Calculate scheduled_at from post_date + post_time
-    scheduled_at = _parse_scheduled_at(special['post_date'], special['post_time'])
+    # 2. scheduled_at
+    scheduled_at = _parse_scheduled_at(post_date, post_time)
     now_ts       = int(time.time())
-    p            = placeholder
 
-    # 3. Write post_history row
+    # 3. Write post_history
     try:
         cur = conn.cursor()
         cur.execute(
             f'INSERT INTO post_history '
             f'(user_id, caption, content_type, image_url, platforms, status, scheduled_at, results, created_at) '
-            f'VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})',
+            f'VALUES ({p},{p},{p},{p},{p},{p},{p},{p},{p})',
             (
-                user_id,
-                master,
-                content_type,
-                image_url,
-                json.dumps(platforms),
-                'scheduled',
-                scheduled_at,
-                json.dumps({'captions': captions, 'special_id': special_id}),
+                user_id, master, content_type, image_url,
+                json.dumps(platforms), 'scheduled', scheduled_at,
+                json.dumps({'captions': captions, 'source': source_table, 'source_id': source_id}),
                 now_ts,
             )
         )
         post_id = cur.lastrowid
         conn.commit()
-        logger.info(
-            'automation_agent: queued post %s for user %s special "%s" at %s',
-            post_id, user_id, special.get('item_name'), scheduled_at
-        )
     except Exception as e:
-        logger.error('automation_agent: failed to write post_history for special %s: %s', special_id, e)
+        logger.error('agent post_history insert failed %s#%s: %s', source_table, source_id, e)
         return False
 
-    # 4. Mark special as queued
+    # 4. Mark source row queued
     try:
         cur.execute(
-            f"UPDATE specials SET status = 'queued', post_history_id = {p}, updated_at = {p} "
-            f"WHERE id = {p}",
-            (post_id, now_ts, special_id)
+            f"UPDATE {source_table} SET status='queued', post_history_id={p}, updated_at={p} WHERE id={p}",
+            (post_id, now_ts, source_id)
         )
         conn.commit()
     except Exception as e:
-        logger.warning('automation_agent: failed to update special status %s: %s', special_id, e)
-        # Non-fatal: post is queued, just the status flag didn't update
+        logger.warning('agent status update failed %s#%s: %s', source_table, source_id, e)
 
-    # 5. Write automation_log audit row
-    _write_log(conn, user_id, post_id, special_id, content_type, tone, keywords, master, scheduled_at)
-
+    # 5. Audit log
+    _write_log(conn, user_id, post_id, source_id, source_table, content_type, tone, keywords, master, scheduled_at)
+    logger.info('agent queued post %s for user %s [%s#%s] at %s', post_id, user_id, source_table, source_id, scheduled_at)
     return True
 
 
@@ -236,11 +311,35 @@ def _queue_special(conn, profile: Dict, special: Dict) -> bool:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _build_business_info(profile: Dict, extra: Dict = None) -> Dict:
+    info = {
+        'name':     profile.get('name', 'Our Business'),
+        'type':     profile.get('business_type', 'restaurant'),
+        'location': profile.get('location', ''),
+        'hours':    profile.get('hours', ''),
+    }
+    if extra:
+        info.update(extra)
+    return info
+
+
+def _parse_platforms(raw) -> List[str]:
+    if not raw:
+        return ACTIVE_PLATFORMS
+    try:
+        result = json.loads(raw)
+        return result if isinstance(result, list) and result else ACTIVE_PLATFORMS
+    except (TypeError, ValueError):
+        return ACTIVE_PLATFORMS
+
+
+def _keywords_from(text: Optional[str]) -> List[str]:
+    if not text:
+        return []
+    return [k.strip() for k in text.split(',') if k.strip()]
+
+
 def _parse_scheduled_at(post_date: str, post_time: str) -> int:
-    """
-    Parse 'YYYY-MM-DD' + 'HH:MM' -> Unix timestamp (UTC).
-    Falls back to midnight UTC if parsing fails.
-    """
     try:
         dt = datetime.strptime(f'{post_date} {post_time}', '%Y-%m-%d %H:%M')
         return int(dt.replace(tzinfo=timezone.utc).timestamp())
@@ -253,45 +352,24 @@ def _parse_scheduled_at(post_date: str, post_time: str) -> int:
 
 
 def _row_to_dict(row, keys: List[str]) -> Dict:
-    """Normalise a DB row (sqlite3.Row or psycopg2 RealDictRow or tuple) to a plain dict."""
     if isinstance(row, dict):
         return dict(row)
     try:
-        return dict(row)          # sqlite3.Row supports dict()
+        return dict(row)
     except Exception:
         return dict(zip(keys, row))
 
 
-def _write_log(
-    conn,
-    user_id:      str,
-    post_id:      int,
-    special_id:   int,
-    content_type: str,
-    tone:         str,
-    keywords:     List[str],
-    master:       str,
-    scheduled_at: int,
-) -> None:
-    """Write an audit row to automation_log. Failure is non-fatal."""
+def _write_log(conn, user_id, post_id, source_id, source_table, content_type, tone, keywords, master, scheduled_at):
     p = placeholder
     try:
         cur = conn.cursor()
         cur.execute(
             f'INSERT INTO automation_log '
             f'(user_id, post_id, content_type, tone, keywords, master_caption, scheduled_at, created_at) '
-            f'VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})',
-            (
-                user_id,
-                post_id,
-                content_type,
-                tone,
-                json.dumps(keywords),
-                master,
-                scheduled_at,
-                int(time.time()),
-            )
+            f'VALUES ({p},{p},{p},{p},{p},{p},{p},{p})',
+            (user_id, post_id, content_type, tone, json.dumps(keywords), master, scheduled_at, int(time.time()))
         )
         conn.commit()
     except Exception as e:
-        logger.warning('automation_agent: failed to write automation_log for special %s: %s', special_id, e)
+        logger.warning('agent audit log failed source %s#%s: %s', source_table, source_id, e)
