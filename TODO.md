@@ -1,45 +1,66 @@
 # Post-Pilot — Task List
-*Last updated: 2026-06-28 — Phase 1 complete*
+*Last updated: 2026-06-30 — Audit complete, go-live steps documented*
 
 Priority levels: 🔴 Critical (stop-ship) · 🟠 High · 🟡 Medium · 🟢 Low
 
 ---
 
-## 🔴 CRITICAL — You Must Do These Manually
+## 🔴 CRITICAL — You Must Do These Manually (Go-Live Blockers)
 
-### SEC-1 · Rotate encryption keys
-- [ ] `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-- [ ] Update `TOKEN_ENCRYPTION_KEY` in Vercel env vars
-- [ ] Update `FLASK_SECRET_KEY` in Vercel env vars
-- [ ] Re-encrypt any existing `platform_tokens` rows
+### STEP 1 · Generate secure keys (run locally)
+```bash
+# Flask secret key
+python -c "import secrets; print(secrets.token_hex(32))"
 
-### SEC-2 · Remove binary files from git
+# Fernet encryption key for platform_tokens
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# Cron secret
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+### STEP 2 · Add to Vercel Environment Variables
+- [ ] `FLASK_SECRET_KEY` → output from Step 1
+- [ ] `TOKEN_ENCRYPTION_KEY` → Fernet key from Step 1
+- [ ] `CRON_SECRET` → urlsafe token from Step 1
+- [ ] `OPENAI_API_KEY` → from https://platform.openai.com
+- [ ] `STRIPE_PRICE_STARTER_MONTHLY` / `STRIPE_PRICE_STARTER_ANNUAL`
+- [ ] `STRIPE_PRICE_GROWTH_MONTHLY` / `STRIPE_PRICE_GROWTH_ANNUAL`
+- [ ] `STRIPE_PRICE_PRO_MONTHLY` / `STRIPE_PRICE_PRO_ANNUAL`
+- [ ] `STRIPE_PRICE_AGENCY_MONTHLY` / `STRIPE_PRICE_AGENCY_ANNUAL`
+- [ ] `REDIS_URL` — provision free tier at https://upstash.com, copy Redis URL
+- [ ] `SENTRY_DSN` — optional, from https://sentry.io (add for production error tracking)
+
+### STEP 3 · Add to GitHub Actions Secrets
+- [ ] Go to: repo → Settings → Secrets and variables → Actions
+- [ ] Add `CI_TOKEN_ENCRYPTION_KEY` → same Fernet key used in Vercel
+
+### STEP 4 · Run DB migrations
+```bash
+# From your local machine or Railway shell
+DATABASE_URL=your_postgres_connection_string alembic upgrade head
+```
+> Applies migrations 0003 through 0006 (specials, events, hours_overrides tables)
+
+### STEP 5 · Security check
+- [ ] Confirm `DEV_LOGIN_KEY` is **absent or empty** in Vercel production env vars
+- [ ] Re-encrypt any existing `platform_tokens` rows if TOKEN_ENCRYPTION_KEY changed
+
+### STEP 6 · Git cleanup — remove tracked binaries
 ```bash
 git rm --cached postpilot.db .venv __pycache__ -r --ignore-unmatch
 git commit -m "chore: untrack .db, .venv, __pycache__"
 git push
 ```
 
-### SEC-3 · Disable dev login in production
-- [ ] Confirm `DEV_LOGIN_KEY` is absent or empty in Vercel production env vars
-
----
-
-## 🟠 HIGH — Pending Manual Steps
-
-### INFRA · Env vars to add to Vercel
-- [ ] `OPENAI_API_KEY`
-- [ ] `CRON_SECRET` — `python -c "import secrets; print(secrets.token_urlsafe(32))"`
-- [ ] `STRIPE_PRICE_STARTER_MONTHLY` / `STRIPE_PRICE_STARTER_ANNUAL`
-- [ ] `STRIPE_PRICE_PRO_MONTHLY` / `STRIPE_PRICE_PRO_ANNUAL`
-- [ ] `STRIPE_PRICE_AGENCY_MONTHLY` / `STRIPE_PRICE_AGENCY_ANNUAL`
-- [ ] `REDIS_URL` — provision free Upstash Redis at https://upstash.com
-
-### INFRA · After pushing
-- [ ] Run `alembic upgrade head` — applies migrations 0003 through 0006
-- [ ] Trigger fresh Vercel redeploy
-- [ ] Smoke test: `/login` → magic link → `/schedule` → add a special → POST `/api/cron/generate` → confirm `post_history` row created
-- [ ] Add `/schedule` link to dashboard sidebar nav
+### STEP 7 · Deploy + Smoke Test
+- [ ] Trigger fresh Vercel redeploy after all env vars are set
+- [ ] Visit `/login` → receive magic link → click link → land on dashboard
+- [ ] Go to `/schedule` → add a Special
+- [ ] `POST /api/cron/generate` with `Authorization: Bearer <CRON_SECRET>` header
+- [ ] Confirm a row appears in `post_history` table
+- [ ] Visit `/billing` → verify plan tiers display correctly
+- [ ] Connect one platform (Facebook or Google) via `/settings`
 
 ---
 
@@ -66,18 +87,16 @@ git push
 
 ## 🟡 MEDIUM
 
-- [ ] Stripe webhook handler (`/billing/webhook`) — sync subscription tier on payment events
-- [ ] Agent activity log page (`/dashboard/automation`) — show `automation_log` rows
 - [ ] `check_post_limit()` wired into `api_publish` and `api_push_all`
-- [ ] CI pipeline — add `CI_TOKEN_ENCRYPTION_KEY` to GitHub Actions secrets
-- [ ] Sentry — sign up at https://sentry.io, add `SENTRY_DSN` to Vercel
+- [ ] Agent activity log page (`/dashboard/automation`) — show `automation_log` rows
+- [ ] Add `/schedule` link to dashboard sidebar nav
+- [ ] Replace `print()` with `app.logger` calls
 
 ---
 
 ## 🟢 LOW
 
 - [ ] Redis-backed caching for hot DB queries
-- [ ] Replace `print()` with `app.logger` calls
 - [ ] Favicon (`static/favicon.ico`)
 - [ ] Mobile-responsive dashboard nav
 - [ ] Bulk reschedule / drag-and-drop calendar view
@@ -86,6 +105,11 @@ git push
 
 ## ✅ COMPLETED
 
+- [x] CI pipeline — `.github/workflows/ci.yml` (lint + pytest + coverage on push/PR)
+- [x] Stripe webhook handler — `billing_manager.py` handles all 5 Stripe events (verified 2026-06-30)
+- [x] Tests — `test_smoke.py`, `test_p0_fixes.py`, `test_validator.py`, `conftest.py` (verified 2026-06-30)
+- [x] MCP server — `mcp/server.py` with 7 real tools, stdio + SSE transport (verified 2026-06-30)
+- [x] All 11 blueprints registered and CSRF-exempted correctly (verified 2026-06-30)
 - [x] PHASE 1: Events table + CRUD blueprint (`blueprints/events.py`)
 - [x] PHASE 1: Hours overrides table + CRUD blueprint (`blueprints/hours.py`)
 - [x] PHASE 1: Migration `0006_events_hours.py` — `events` + `hours_overrides` tables
